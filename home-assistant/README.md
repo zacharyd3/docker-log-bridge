@@ -133,7 +133,7 @@ It creates these entities:
 | `sensor.docker_container_problems` | Number of container state problems (unhealthy, restart loops, …) |
 | `sensor.docker_hosts_online`, `sensor.docker_containers_running` | Polled from the bridge every minute, independent of the schedule |
 | `script.docker_log_analysis_run_now` | Triggers your blueprint automation immediately |
-| `script.docker_container_restart` | Restarts a container via its switch: off, wait until it reports off, on. Works with any integration's container switches |
+| `script.docker_container_restart` | Restarts a container via its switch: off, wait until it reports off, wait 5 s, on (aborts if it never reports off within 2 min). Works with any integration's container switches |
 
 The sensors fill in on the next run of the blueprint automation, or press
 **Run check now**. They keep their values across restarts.

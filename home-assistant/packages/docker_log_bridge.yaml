@@ -113,8 +113,9 @@ script:
           skip_condition: true
 
   # Restart a container through its power switch (any integration): turn it
-  # off, wait until it reports off, then turn it back on. The dashboard runs
-  # this when you tap a container tile's icon.
+  # off, wait until the switch reports it stopped, pause 5 s, turn it back on.
+  # If it never reports stopped within 2 minutes the script aborts rather than
+  # sending "on". The dashboard runs this when you tap a container tile's icon.
   docker_container_restart:
     alias: Restart Docker container
     icon: mdi:restart
@@ -135,7 +136,8 @@ script:
           - wait_template: "{{ is_state(entity_id, 'off') }}"
             timeout: "00:02:00"
             continue_on_timeout: false
-          - delay: 2
+          - delay:
+              seconds: 5
       - action: switch.turn_on
         target:
           entity_id: "{{ entity_id }}"
