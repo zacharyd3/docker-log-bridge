@@ -75,8 +75,11 @@ bash "$TMP"
 ```
 
 [`install.sh`](install.sh) pulls the latest `main`, builds the image, and
-recreates the `DockerLogBridge` container on port **8084**. The local Docker
-socket is mounted read-only. Run it again any time to update.
+recreates the `DockerLogBridge` container on port **8084**. If 8084 is
+already taken, it picks the next free port and saves it as `HOST_PORT` in
+`bridge.env`, so the port stays the same on later updates. The script's last
+lines show the URL to use in Home Assistant. The local Docker socket is
+mounted read-only. Run the script again any time to update.
 
 By default it reads the local socket (labelled with the unraid hostname)
 plus `tcp://192.168.250.3:2375|Mjolnir` and `tcp://192.168.250.2:2375|Thor`.
