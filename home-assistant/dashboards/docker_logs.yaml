@@ -13,7 +13,9 @@ views:
     type: sections
     max_columns: 3
     sections:
-      # ── Status ────────────────────────────────────────────────────────────
+      # ── Left: status, issues, trends ──────────────────────────────────────
+      # Two stacks (left wide, right narrow) instead of rows of sections, so a
+      # short status column never leaves a gap under it.
       - type: grid
         column_span: 2
         cards:
@@ -171,7 +173,72 @@ views:
                   ha-icon[icon="mdi:heart-broken"], ha-icon[icon="mdi:stop-circle-outline"] { color: var(--red-color); }
                   ha-icon[icon="mdi:restart-alert"], ha-icon[icon="mdi:timer-sand"] { color: var(--amber-color); }
 
-      # ── Hosts ─────────────────────────────────────────────────────────────
+          - type: heading
+            heading: Last 24 hours
+            icon: mdi:chart-timeline-variant
+
+          - type: custom:apexcharts-card
+            grid_options:
+              columns: full
+            graph_span: 24h
+            header:
+              show: true
+              title: Errors & warnings per check
+              show_states: true
+              colorize_states: true
+            apex_config:
+              chart:
+                height: 220
+              legend:
+                show: false
+              grid:
+                strokeDashArray: 3
+              yaxis:
+                - id: errors
+                  min: 0
+                  forceNiceScale: true
+                  decimalsInFloat: 0
+                  labels:
+                    style:
+                      colors: "#e5484d"
+                - id: warnings
+                  opposite: true
+                  min: 0
+                  forceNiceScale: true
+                  decimalsInFloat: 0
+                  labels:
+                    style:
+                      colors: "#f5a524"
+            series:
+              - entity: sensor.docker_log_errors
+                name: Errors
+                yaxis_id: errors
+                type: column
+                color: "#e5484d"
+                group_by:
+                  func: max
+                  duration: 30min
+              - entity: sensor.docker_log_warnings
+                name: Warnings
+                yaxis_id: warnings
+                type: area
+                curve: smooth
+                stroke_width: 2
+                opacity: 0.15
+                color: "#f5a524"
+                group_by:
+                  func: max
+                  duration: 30min
+
+          - type: history-graph
+            hours_to_show: 24
+            grid_options:
+              columns: full
+            entities:
+              - entity: sensor.docker_log_health
+                name: Status
+
+      # ── Right: hosts, noisiest containers, recent analyses ────────────────
       - type: grid
         cards:
           - type: heading
@@ -246,78 +313,6 @@ views:
                   }
                   {% endfor %}
 
-      # ── Trends ────────────────────────────────────────────────────────────
-      - type: grid
-        column_span: 2
-        cards:
-          - type: heading
-            heading: Last 24 hours
-            icon: mdi:chart-timeline-variant
-
-          - type: custom:apexcharts-card
-            grid_options:
-              columns: full
-            graph_span: 24h
-            header:
-              show: true
-              title: Errors & warnings per check
-              show_states: true
-              colorize_states: true
-            apex_config:
-              chart:
-                height: 220
-              legend:
-                show: false
-              grid:
-                strokeDashArray: 3
-              yaxis:
-                - id: errors
-                  min: 0
-                  forceNiceScale: true
-                  decimalsInFloat: 0
-                  labels:
-                    style:
-                      colors: "#e5484d"
-                - id: warnings
-                  opposite: true
-                  min: 0
-                  forceNiceScale: true
-                  decimalsInFloat: 0
-                  labels:
-                    style:
-                      colors: "#f5a524"
-            series:
-              - entity: sensor.docker_log_errors
-                name: Errors
-                yaxis_id: errors
-                type: column
-                color: "#e5484d"
-                group_by:
-                  func: max
-                  duration: 30min
-              - entity: sensor.docker_log_warnings
-                name: Warnings
-                yaxis_id: warnings
-                type: area
-                curve: smooth
-                stroke_width: 2
-                opacity: 0.15
-                color: "#f5a524"
-                group_by:
-                  func: max
-                  duration: 30min
-
-          - type: history-graph
-            hours_to_show: 24
-            grid_options:
-              columns: full
-            entities:
-              - entity: sensor.docker_log_health
-                name: Status
-
-      # ── Recent analyses ───────────────────────────────────────────────────
-      - type: grid
-        cards:
           - type: heading
             heading: Recent analyses
             icon: mdi:history
@@ -325,7 +320,7 @@ views:
           - type: markdown
             content: |
               {% set icons = {'ok': 'check-circle', 'warning': 'alert', 'critical': 'alert-octagon', 'error': 'lan-disconnect'} %}
-              {% for h in state_attr('sensor.docker_log_health', 'history') or [] %}
+              {% for h in (state_attr('sensor.docker_log_health', 'history') or [])[:6] %}
               <ha-icon icon="mdi:{{ icons.get(h.status, 'help-circle') }}"></ha-icon> **{{ as_timestamp(h.at) | timestamp_custom('%a %H:%M') }}**{{ '' if h.analysed else ' · _no AI_' }}<br>{{ h.summary }}
 
               {% else %}
