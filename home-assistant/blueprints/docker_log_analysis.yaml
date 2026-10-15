@@ -1,0 +1,404 @@
+blueprint:
+  name: Docker log analysis (AI Task)
+  author: zacharyd3
+  description: >
+    Every few minutes, pulls the last N minutes of container logs from
+    [docker-log-bridge](https://github.com/zacharyd3/docker-log-bridge)
+    (local socket + remote Docker hosts, the same ones Dozzle reads), has an
+    AI Task entity analyse them with `ai_task.generate_data`, and notifies you
+    when something needs attention.
+
+
+    **One-time setup:** add the `rest_command.docker_log_bridge` snippet from
+    the repo's `home-assistant/README.md` to `configuration.yaml` and restart.
+
+
+    Every run also fires a `docker_log_analysis` event (status, summary,
+    issues, ...) so you can feed a template sensor or a dashboard card.
+  domain: automation
+  source_url: https://github.com/zacharyd3/docker-log-bridge/blob/main/home-assistant/blueprints/docker_log_analysis.yaml
+  homeassistant:
+    min_version: "2025.8.0"
+  input:
+    bridge_section:
+      name: Bridge
+      icon: mdi:docker
+      input:
+        bridge_url:
+          name: Bridge URL
+          description: Base URL of the docker-log-bridge container (no trailing path).
+          default: http://192.168.250.4:8084
+          selector:
+            text:
+              type: url
+        rest_command_action:
+          name: REST command
+          description: >
+            The rest_command you added to configuration.yaml. Only change this
+            if you named it something other than docker_log_bridge.
+          default: rest_command.docker_log_bridge
+          selector:
+            text:
+
+    schedule_section:
+      name: Schedule
+      icon: mdi:clock-outline
+      input:
+        interval:
+          name: Run every
+          default: "/10"
+          selector:
+            select:
+              options:
+                - label: 5 minutes
+                  value: "/5"
+                - label: 10 minutes
+                  value: "/10"
+                - label: 15 minutes
+                  value: "/15"
+                - label: 20 minutes
+                  value: "/20"
+                - label: 30 minutes
+                  value: "/30"
+        lookback:
+          name: Look back (minutes)
+          description: >
+            How much log history each run analyses. 0 = same as the run
+            interval, so every line is looked at exactly once.
+          default: 0
+          selector:
+            number:
+              min: 0
+              max: 1440
+              unit_of_measurement: min
+              mode: box
+
+    filter_section:
+      name: What to read
+      icon: mdi:filter-outline
+      collapsed: true
+      input:
+        hosts:
+          name: Docker hosts
+          description: >
+            Comma-separated host labels from the bridge's DOCKER_HOSTS
+            (e.g. "Unraid, Thor"). Empty = all hosts.
+          default: ""
+          selector:
+            text:
+        containers:
+          name: Only these containers
+          description: >
+            Comma-separated names or globs. `plex`, `*arr`, `Thor/*` all work.
+            Empty = every container.
+          default: ""
+          selector:
+            text:
+        exclude:
+          name: Exclude containers
+          description: Comma-separated names or globs to skip (e.g. "dozzle, docker-log-bridge").
+          default: ""
+          selector:
+            text:
+        ignore:
+          name: Ignore lines matching (regex)
+          description: >
+            Case-insensitive regular expression; matching lines are dropped
+            before analysis. e.g. `GET /(health|ping)|Session .* expired`.
+          default: ""
+          selector:
+            text:
+        level:
+          name: Minimum level sent to the AI
+          description: >
+            "Warnings & errors" keeps prompts small and cheap; "Everything"
+            gives the AI more context. Container state problems (crash loops,
+            unhealthy, OOM, unreachable hosts) are always included.
+          default: warning
+          selector:
+            select:
+              options:
+                - label: Everything (incl. debug)
+                  value: all
+                - label: Info and above
+                  value: info
+                - label: Warnings & errors
+                  value: warning
+                - label: Errors only
+                  value: error
+        max_chars:
+          name: Max report size (characters)
+          description: >
+            Upper bound on the text sent to the AI (~4 characters per token).
+            The bridge keeps the most severe lines when it has to trim.
+          default: 40000
+          selector:
+            number:
+              min: 2000
+              max: 400000
+              step: 1000
+              mode: box
+
+    ai_section:
+      name: AI analysis
+      icon: mdi:robot-outline
+      input:
+        ai_task_entity:
+          name: AI Task entity
+          description: Leave empty to use your default AI Task entity.
+          default: ""
+          selector:
+            entity:
+              filter:
+                domain: ai_task
+        extra_instructions:
+          name: Extra instructions
+          description: >
+            Context about your setup, things to ignore, or what to focus on.
+            e.g. "Thor runs the media stack; Plex transcoder warnings are normal."
+          default: ""
+          selector:
+            text:
+              multiline: true
+        skip_when_quiet:
+          name: Skip AI when nothing looks wrong
+          description: >
+            Don't call the AI at all when the window has no warnings/errors,
+            no container state problems and every host answered. Saves tokens.
+          default: true
+          selector:
+            boolean:
+
+    notify_section:
+      name: Notifications
+      icon: mdi:bell-outline
+      input:
+        min_severity:
+          name: Notify at
+          default: warning
+          selector:
+            select:
+              options:
+                - label: Warning or worse
+                  value: warning
+                - label: Critical only
+                  value: critical
+        persistent_notification:
+          name: Show a persistent notification
+          description: Replaces the previous one, so they don't pile up.
+          default: true
+          selector:
+            boolean:
+        notify_bridge_errors:
+          name: Notify when the bridge can't be reached
+          default: true
+          selector:
+            boolean:
+        notify_actions:
+          name: Extra actions
+          description: >
+            Run when an analysis meets the threshold, e.g. a mobile push.
+            Available variables: `analysis.status`, `analysis.summary`,
+            `analysis.issues`, `notification_title`, `notification_message`.
+          default: []
+          selector:
+            action:
+
+triggers:
+  - trigger: time_pattern
+    minutes: !input interval
+
+mode: single
+max_exceeded: silent
+
+variables:
+  bridge_url: !input bridge_url
+  interval: !input interval
+  lookback: !input lookback
+  hosts: !input hosts
+  containers: !input containers
+  exclude: !input exclude
+  ignore: !input ignore
+  level: !input level
+  max_chars: !input max_chars
+  ai_task_entity: !input ai_task_entity
+  extra_instructions: !input extra_instructions
+  skip_when_quiet: !input skip_when_quiet
+  min_severity: !input min_severity
+  persistent_notification: !input persistent_notification
+  notify_bridge_errors: !input notify_bridge_errors
+  window_minutes: >-
+    {{ lookback | int(0) if lookback | int(0) > 0 else interval | replace('/', '') | int(10) }}
+  severity_rank: {ok: 0, warning: 1, critical: 2}
+
+actions:
+  - action: !input rest_command_action
+    data:
+      url: "{{ bridge_url | regex_replace('/+$', '') }}/api/logs"
+      params:
+        minutes: "{{ window_minutes }}"
+        level: "{{ level }}"
+        hosts: "{{ hosts }}"
+        containers: "{{ containers }}"
+        exclude: "{{ exclude }}"
+        ignore: "{{ ignore }}"
+        max_chars: "{{ max_chars | int(40000) }}"
+    response_variable: bridge
+    continue_on_error: true
+
+  - variables:
+      bridge_ok: >-
+        {{ bridge is defined and bridge.status | default(0) == 200
+           and bridge.content is mapping and 'text' in bridge.content }}
+
+  - if: "{{ not bridge_ok }}"
+    then:
+      - if: "{{ notify_bridge_errors }}"
+        then:
+          - action: persistent_notification.create
+            data:
+              notification_id: docker_log_bridge_error
+              title: Docker log bridge unreachable
+              message: >-
+                Couldn't fetch logs from {{ bridge_url }}
+                {%- if bridge is defined %} (HTTP {{ bridge.status | default('?') }}:
+                {{ (bridge.content | default('') | string)[:300] }}){% endif %}.
+                Check that the container is running and that
+                rest_command.docker_log_bridge is configured.
+      - stop: Bridge request failed
+
+  - action: persistent_notification.dismiss
+    data:
+      notification_id: docker_log_bridge_error
+
+  - variables:
+      report: "{{ bridge.content }}"
+
+  - if: "{{ skip_when_quiet and not report.has_findings }}"
+    then:
+      - event: docker_log_analysis
+        event_data:
+          status: ok
+          summary: No warnings, errors or container problems in the last {{ window_minutes }} minutes.
+          issues: ""
+          analysed: false
+          window_minutes: "{{ window_minutes }}"
+          generated_at: "{{ report.generated_at }}"
+      - stop: Nothing worth analysing
+
+  - variables:
+      ai_instructions: |-
+        You are a site-reliability engineer reviewing Docker container logs from a home lab.
+        The report below covers the last {{ window_minutes }} minutes from these Docker hosts:
+        {{ report.hosts | map(attribute='name') | join(', ') }}.
+        Repeated lines are collapsed with (xN) counts and indented lines belong to the line
+        above them. [E]/[W]/[I]/[D] levels are a keyword heuristic and can be wrong.
+
+        Decide whether anything needs the owner's attention.
+        - Prioritise: unreachable hosts, crash or restart loops, failing health checks,
+          OOM kills, disk-full / database / filesystem errors, persistent connection or
+          authentication failures, and anything that risks data loss.
+        - Treat as noise unless it is persistent or escalating: single timeouts that recover,
+          deprecation notices, debug chatter, normal startup messages, routine HTTP access logs.
+        - A container that "started during window" may just have been updated; only flag it if
+          its logs show it failing.
+        - Merge issues that share a root cause, even across containers or hosts.
+        - Be specific: name host/container, quote the key error briefly, and give the most
+          likely cause and fix. Do not invent problems that are not in the report.
+        - If nothing is actionable, status must be "ok" and issues empty.
+        {%- if extra_instructions | trim %}
+
+        Notes from the owner about this setup:
+        {{ extra_instructions | trim }}
+        {%- endif %}
+
+        ===== REPORT =====
+        {{ report.text }}
+
+  - if: "{{ ai_task_entity | default('', true) | length > 0 }}"
+    then:
+      - action: ai_task.generate_data
+        data:
+          task_name: Docker log analysis
+          entity_id: "{{ ai_task_entity }}"
+          instructions: "{{ ai_instructions }}"
+          structure: &ai_structure
+            status:
+              description: >-
+                ok = nothing actionable; warning = should be looked at soon;
+                critical = something is broken now or data is at risk.
+              required: true
+              selector:
+                select:
+                  options:
+                    - ok
+                    - warning
+                    - critical
+            summary:
+              description: One or two plain sentences suitable for a phone notification.
+              required: true
+              selector:
+                text:
+            issues:
+              description: >-
+                One line per distinct issue, formatted "- host/container: problem -> suggested fix".
+                Empty when status is ok.
+              required: false
+              selector:
+                text:
+                  multiline: true
+        response_variable: ai
+    else:
+      # Same call without entity_id, so HA uses the default AI Task entity.
+      - action: ai_task.generate_data
+        data:
+          task_name: Docker log analysis
+          instructions: "{{ ai_instructions }}"
+          structure: *ai_structure
+        response_variable: ai
+
+  - variables:
+      analysis:
+        status: "{{ ai.data.status | default('warning') | lower }}"
+        summary: "{{ ai.data.summary | default('The AI returned no summary.') }}"
+        issues: "{{ ai.data.issues | default('') }}"
+      notification_title: >-
+        Docker {{ ai.data.status | default('warning') | lower }}:
+        {{ report.stats.errors }} errors / {{ report.stats.warnings }} warnings
+        in {{ window_minutes }} min
+      notification_message: |-
+        {{ ai.data.summary | default('') }}
+        {%- if ai.data.issues | default('') | trim %}
+
+        {{ ai.data.issues | trim }}
+        {%- endif %}
+
+        _{{ report.since[11:16] }}–{{ report.generated_at[11:16] }} · {{ report.stats.containers_with_output }} containers with output · {{ report.stats.raw_lines }} lines_
+
+  - event: docker_log_analysis
+    event_data:
+      status: "{{ analysis.status }}"
+      summary: "{{ analysis.summary }}"
+      issues: "{{ analysis.issues }}"
+      analysed: true
+      window_minutes: "{{ window_minutes }}"
+      generated_at: "{{ report.generated_at }}"
+      errors: "{{ report.stats.errors }}"
+      warnings: "{{ report.stats.warnings }}"
+      problems: "{{ report.problems }}"
+      hosts_down: "{{ report.hosts_down }}"
+
+  - condition: template
+    value_template: >-
+      {{ severity_rank.get(analysis.status, 1) >= severity_rank.get(min_severity, 1) }}
+
+  - if: "{{ persistent_notification }}"
+    then:
+      - action: persistent_notification.create
+        data:
+          notification_id: docker_log_analysis
+          title: "{{ notification_title }}"
+          message: "{{ notification_message }}"
+
+  - choose: []
+    default: !input notify_actions
