@@ -111,8 +111,9 @@ See [`home-assistant/README.md`](home-assistant/README.md). In short:
    ignore regex, level, AI entity, extra instructions and notification actions
    are all configurable.
 3. Optional: add the [package](home-assistant/packages/docker_log_bridge.yaml) and
-   [dashboard](home-assistant/dashboards/docker_logs.yaml) for a status page
-   (Mushroom, ApexCharts and card-mod from HACS).
+   [dashboard](home-assistant/dashboards/docker_logs.yaml) for a status page with
+   per-host container power toggles (Mushroom, ApexCharts, card-mod and
+   auto-entities from HACS).
 
 ## API
 
