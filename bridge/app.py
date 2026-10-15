@@ -56,7 +56,7 @@ DEFAULTS = {
     "ignore": os.environ.get("IGNORE_PATTERN", ""),
 }
 COLLECTOR = Collector(HOSTS, _tz(), docker_timeout=_env_int("DOCKER_TIMEOUT", 20),
-                      workers=_env_int("WORKERS", 8))
+                      workers=_env_int("WORKERS", 8), fetch_tail=max(100, _env_int("FETCH_TAIL", 10000)))
 
 app = Flask(__name__)
 

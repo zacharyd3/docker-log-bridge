@@ -93,12 +93,13 @@ class Query:
 
 class Collector:
     def __init__(self, hosts: list[Host], tz, docker_timeout: int = 20, workers: int = 8,
-                 max_bytes_per_container: int = 20_000_000):
+                 max_bytes_per_container: int = 20_000_000, fetch_tail: int = 10000):
         self.hosts = hosts
         self.tz = tz
         self.docker_timeout = docker_timeout
         self.workers = workers
         self.max_bytes = max_bytes_per_container
+        self.fetch_tail = fetch_tail
         self._clients: dict[str, docker.DockerClient] = {}
         self._lock = threading.Lock()
 
@@ -153,15 +154,22 @@ class Collector:
 
     def _read_logs(self, host: Host, info: dict, since: datetime, q: Query) -> ContainerLog:
         clog = ContainerLog(host=host.name, name=info["name"], ignore=q.ignore)
+        # `tail` matters a lot: with `since` alone the daemon decodes the whole
+        # log file from the start to find the window (seconds per large log,
+        # minutes across a server). With `tail` it reads backwards from the
+        # end and then applies `since`, so only the window is ever touched.
         stream = self.client(host).api.logs(info["id"], stream=True, follow=False, timestamps=True,
-                                            stdout=True, stderr=True, since=int(since.timestamp()))
+                                            stdout=True, stderr=True, since=int(since.timestamp()),
+                                            tail=self.fetch_tail)
         buf = b""
         seen = 0
+        received = 0
         try:
             for chunk in stream:
                 seen += len(chunk)
                 buf += chunk
                 *lines, buf = buf.split(b"\n")
+                received += len(lines)
                 for line in lines:
                     clog.add(line.decode("utf-8", "replace"))
                 if seen > self.max_bytes:
@@ -174,7 +182,10 @@ class Collector:
             if close:
                 close()
         if buf:
+            received += 1
             clog.add(buf.decode("utf-8", "replace"))
+        if received >= self.fetch_tail:
+            clog.capped_at = self.fetch_tail  # the window had more; we got the newest
         return clog
 
     # -- Reports ----------------------------------------------------------
@@ -222,6 +233,7 @@ class Collector:
         return True
 
     def report(self, q: Query) -> dict:
+        started = time.monotonic()
         now = datetime.now(timezone.utc)
         since = now - timedelta(minutes=q.minutes)
         hosts = self.selected_hosts(q)
@@ -276,6 +288,9 @@ class Collector:
 
         text, shown, truncated, noisy = self._render(logs, problems, host_results, log_errors,
                                                      since, now, q, len(inventory))
+        elapsed_ms = round((time.monotonic() - started) * 1000)
+        log.info("report: %g min, %d containers on %d host(s), %d lines -> %d chars in %d ms",
+                 q.minutes, len(targets), len(hosts), raw, len(text), elapsed_ms)
         return {
             "generated_at": now.astimezone(self.tz).isoformat(timespec="seconds"),
             "since": since.astimezone(self.tz).isoformat(timespec="seconds"),
@@ -294,6 +309,7 @@ class Collector:
                 "errors": totals["error"],
                 "warnings": totals["warning"],
                 "truncated": truncated,
+                "elapsed_ms": elapsed_ms,
             },
             "noisiest": noisy,
             # True when there's anything worth an LLM's time at the requested level.
@@ -336,7 +352,7 @@ class Collector:
             if len(text) <= q.max_chars or cap <= 5:
                 break
             cap = max(5, cap // 2)
-        truncated = hidden_any
+        truncated = hidden_any or any(l.capped_at for l in logs)
         if len(text) > q.max_chars:
             text = text[: q.max_chars - 60].rsplit("\n", 1)[0] + "\n... [report truncated to fit max_chars]\n"
             truncated = True
@@ -361,6 +377,8 @@ class Collector:
                 bits.append(f"{counts['warning']} warn")
             if clog.ignored:
                 bits.append(f"{clog.ignored} ignored")
+            if clog.capped_at:
+                bits.append(f"only the newest {clog.capped_at} were read")
             body.append("")
             body.append(f"### {clog.host}/{clog.name} ({', '.join(bits)})")
             for e in entries:

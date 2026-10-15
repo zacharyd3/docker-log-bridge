@@ -147,6 +147,7 @@ class ContainerLog:
 
     raw_lines: int = 0
     ignored: int = 0
+    capped_at: int = 0  # >0 when the Docker fetch hit its `tail` limit
     dropped_unique: int = 0
     entries: list[Entry] = field(default_factory=list)
     _index: dict[str, Entry] = field(default_factory=dict)

@@ -149,6 +149,7 @@ The JSON response has `text` (the report), `has_findings`, `stats`
 | `DEFAULT_MINUTES` / `DEFAULT_LEVEL` / `DEFAULT_MAX_LINES` / `DEFAULT_MAX_CHARS` | 10 / info / 150 / 40000 | Defaults for requests that don't set them |
 | `TZ` | UTC | Timezone for report timestamps (install.sh uses the unraid timezone) |
 | `DOCKER_TIMEOUT` | 20 | Seconds per Docker API call |
+| `FETCH_TAIL` | 10000 | Most lines read per container per request (newest first). This keeps reads fast on big log files; the report notes when a container hit it |
 | `PORT` | 8080 | Port inside the container |
 
 ## Security

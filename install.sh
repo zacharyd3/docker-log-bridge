@@ -55,6 +55,10 @@ if [ ! -f "$ENV_FILE" ]; then
 #DEFAULT_MAX_LINES=150
 #DEFAULT_MAX_CHARS=40000
 
+# Most lines read per container per request (newest win; the report says
+# when a container hits it). Keeps reads fast even on huge log files:
+#FETCH_TAIL=10000
+
 # Timezone used for timestamps in the report:
 #TZ=America/Toronto
 EOF
