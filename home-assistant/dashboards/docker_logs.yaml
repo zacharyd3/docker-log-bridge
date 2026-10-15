@@ -6,7 +6,7 @@
 # layout below is plain markdown (paragraphs, tables, rules) styled through
 # card-mod with element/attribute selectors.
 #
-# Container columns: one section per Docker host, each listing that host's
+# Container columns: one stack per Docker host (under the charts), each listing that host's
 # container switches (switch.docker_<host>_*, e.g. from the Monitor Docker
 # integration) via auto-entities (HACS). Rename/add host sections to match
 # your DOCKER_HOSTS labels. Tiles pick up the log check's verdict by matching
@@ -244,6 +244,202 @@ views:
               - entity: sensor.docker_log_health
                 name: Status
 
+          - type: heading
+            heading: Containers
+            icon: mdi:docker
+
+          # Odin
+          - type: vertical-stack
+            grid_options:
+              columns: 8
+            cards:
+              - type: custom:mushroom-template-card
+                entity: sensor.docker_hosts_online
+                grid_options:
+                  columns: full
+                primary: Odin
+                secondary: >-
+                  {% set h = (state_attr(entity, 'hosts') or []) | selectattr('name', 'eq', 'Odin') | list | first | default(none) %}
+                  {% if h is none %}Not reported by the bridge{% elif h.ok %}{{ h.running }} of {{ h.containers }} running · {{ h.latency_ms }} ms{% else %}Unreachable · {{ h.error }}{% endif %}
+                icon: mdi:server
+                color: >-
+                  {% set h = (state_attr(entity, 'hosts') or []) | selectattr('name', 'eq', 'Odin') | list | first | default(none) %}
+                  {{ 'green' if h and h.ok else 'red' if h else 'disabled' }}
+                tap_action:
+                  action: more-info
+                card_mod:
+                  style: |
+                    ha-card { background: none !important; border: none !important; box-shadow: none !important; padding: 0 !important; }
+                    ha-tile-info { --tile-info-primary-font-size: 20px !important; --tile-info-primary-line-height: 26px !important; --tile-info-primary-font-weight: 500 !important; }
+
+              - type: custom:auto-entities
+                grid_options:
+                  columns: full
+                show_empty: true
+                card:
+                  type: grid
+                  columns: 1
+                  square: false
+                card_param: cards
+                filter:
+                  include:
+                    - entity_id: switch.docker_odin_*
+                      options: &container_tile
+                        type: custom:mushroom-template-card
+                        entity: this.entity_id
+                        # Host and container come from the entity id
+                        # (switch.docker_<host>_<container>) and are compared with
+                        # the bridge's "Host/container" names, ignoring case and
+                        # punctuation, to find this container's problems/log volume.
+                        primary: >-
+                          {% set host = entity.split('.')[1].split('_')[1] %}
+                          {{ state_attr(entity, 'friendly_name') | regex_replace('(?i)^(docker[\s_-]+)?' ~ host ~ '[\s_-]+', '') }}
+                        secondary: >-
+                          {% set id = entity.split('.')[1].split('_', 2) %}
+                          {% set key = id[1] ~ '/' ~ (id[2] if id | length > 2 else '') | regex_replace('[^a-z0-9]', '') %}
+                          {% set ns = namespace(problem='', lines=0) %}
+                          {% for p in state_attr('sensor.docker_log_health', 'problems') or [] %}
+                            {% if p.partition(': ')[0] | lower | regex_replace('[^a-z0-9/]', '') == key %}{% set ns.problem = p.partition(': ')[2] %}{% endif %}
+                          {% endfor %}
+                          {% for n in state_attr('sensor.docker_log_health', 'noisiest') or [] %}
+                            {% if n.container | lower | regex_replace('[^a-z0-9/]', '') == key %}{% set ns.lines = n.lines %}{% endif %}
+                          {% endfor %}
+                          {# Short form; the full text is in the Container state card. #}
+                          {% set short = ns.problem.split(' - ')[0].split(' (')[0] | replace('started during window, ', 'restarted ') %}
+                          {% if ns.problem %}{{ short | capitalize }}
+                          {% elif is_state(entity, 'off') %}Stopped
+                          {% elif ns.lines %}Running · {{ ns.lines }} log lines
+                          {% else %}Running{% endif %}
+                        icon: mdi:docker
+                        color: >-
+                          {% set id = entity.split('.')[1].split('_', 2) %}
+                          {% set key = id[1] ~ '/' ~ (id[2] if id | length > 2 else '') | regex_replace('[^a-z0-9]', '') %}
+                          {% set ns = namespace(problem='') %}
+                          {% for p in state_attr('sensor.docker_log_health', 'problems') or [] %}
+                            {% if p.partition(': ')[0] | lower | regex_replace('[^a-z0-9/]', '') == key %}{% set ns.problem = p.partition(': ')[2] %}{% endif %}
+                          {% endfor %}
+                          {% if 'UNHEALTHY' in ns.problem or 'stopped' in ns.problem or 'restart loop' in ns.problem %}red
+                          {% elif ns.problem %}amber
+                          {% elif is_state(entity, 'on') %}blue
+                          {% else %}disabled{% endif %}
+                        features_position: inline
+                        features:
+                          - type: toggle
+                        tap_action:
+                          action: more-info
+                        # Tap the icon to restart (stop, wait, start) after a confirmation.
+                        icon_tap_action:
+                          action: perform-action
+                          perform_action: script.docker_container_restart
+                          data:
+                            entity_id: this.entity_id
+                          confirmation:
+                            text: Restart this container?
+                        hold_action:
+                          action: more-info
+                        # A compact switch instead of the default wide bar, so
+                        # container names fit in a third of the section.
+                        card_mod:
+                          style:
+                            .: |
+                              hui-card-features.features-inline { width: 60px !important; min-width: 60px !important; flex: none !important; }
+                            hui-card-features$: |
+                              hui-card-feature { width: 100% !important; min-width: 0 !important; }
+                sort:
+                  method: name
+                  ignore_case: true
+                else:
+                  type: markdown
+                  content: _No `switch.docker_odin_*` entities found._
+
+          # Thor
+          - type: vertical-stack
+            grid_options:
+              columns: 8
+            cards:
+              - type: custom:mushroom-template-card
+                entity: sensor.docker_hosts_online
+                grid_options:
+                  columns: full
+                primary: Thor
+                secondary: >-
+                  {% set h = (state_attr(entity, 'hosts') or []) | selectattr('name', 'eq', 'Thor') | list | first | default(none) %}
+                  {% if h is none %}Not reported by the bridge{% elif h.ok %}{{ h.running }} of {{ h.containers }} running · {{ h.latency_ms }} ms{% else %}Unreachable · {{ h.error }}{% endif %}
+                icon: mdi:server
+                color: >-
+                  {% set h = (state_attr(entity, 'hosts') or []) | selectattr('name', 'eq', 'Thor') | list | first | default(none) %}
+                  {{ 'green' if h and h.ok else 'red' if h else 'disabled' }}
+                tap_action:
+                  action: more-info
+                card_mod:
+                  style: |
+                    ha-card { background: none !important; border: none !important; box-shadow: none !important; padding: 0 !important; }
+                    ha-tile-info { --tile-info-primary-font-size: 20px !important; --tile-info-primary-line-height: 26px !important; --tile-info-primary-font-weight: 500 !important; }
+
+              - type: custom:auto-entities
+                grid_options:
+                  columns: full
+                show_empty: true
+                card:
+                  type: grid
+                  columns: 1
+                  square: false
+                card_param: cards
+                filter:
+                  include:
+                    - entity_id: switch.docker_thor_*
+                      options: *container_tile
+                sort:
+                  method: name
+                  ignore_case: true
+                else:
+                  type: markdown
+                  content: _No `switch.docker_thor_*` entities found._
+
+          # Mjolnir
+          - type: vertical-stack
+            grid_options:
+              columns: 8
+            cards:
+              - type: custom:mushroom-template-card
+                entity: sensor.docker_hosts_online
+                grid_options:
+                  columns: full
+                primary: Mjolnir
+                secondary: >-
+                  {% set h = (state_attr(entity, 'hosts') or []) | selectattr('name', 'eq', 'Mjolnir') | list | first | default(none) %}
+                  {% if h is none %}Not reported by the bridge{% elif h.ok %}{{ h.running }} of {{ h.containers }} running · {{ h.latency_ms }} ms{% else %}Unreachable · {{ h.error }}{% endif %}
+                icon: mdi:server
+                color: >-
+                  {% set h = (state_attr(entity, 'hosts') or []) | selectattr('name', 'eq', 'Mjolnir') | list | first | default(none) %}
+                  {{ 'green' if h and h.ok else 'red' if h else 'disabled' }}
+                tap_action:
+                  action: more-info
+                card_mod:
+                  style: |
+                    ha-card { background: none !important; border: none !important; box-shadow: none !important; padding: 0 !important; }
+                    ha-tile-info { --tile-info-primary-font-size: 20px !important; --tile-info-primary-line-height: 26px !important; --tile-info-primary-font-weight: 500 !important; }
+
+              - type: custom:auto-entities
+                grid_options:
+                  columns: full
+                show_empty: true
+                card:
+                  type: grid
+                  columns: 1
+                  square: false
+                card_param: cards
+                filter:
+                  include:
+                    - entity_id: switch.docker_mjolnir_*
+                      options: *container_tile
+                sort:
+                  method: name
+                  ignore_case: true
+                else:
+                  type: markdown
+                  content: _No `switch.docker_mjolnir_*` entities found._
+
       # ── Right: noisiest containers, recent analyses ───────────────────────
       - type: grid
         cards:
@@ -309,174 +505,3 @@ views:
                   ha-icon[icon="mdi:check-circle"] { color: var(--green-color); }
                   ha-icon[icon="mdi:alert"] { color: var(--amber-color); }
                   ha-icon[icon="mdi:alert-octagon"] { color: var(--red-color); }
-
-      # ── Containers: one column per Docker host ────────────────────────────
-      # ── Odin ──────────────────────────────────────────────────────────────
-      - type: grid
-        cards:
-          - type: custom:mushroom-template-card
-            entity: sensor.docker_hosts_online
-            grid_options:
-              columns: full
-            primary: Odin
-            secondary: >-
-              {% set h = (state_attr(entity, 'hosts') or []) | selectattr('name', 'eq', 'Odin') | list | first | default(none) %}
-              {% if h is none %}Not reported by the bridge{% elif h.ok %}{{ h.running }} of {{ h.containers }} running · {{ h.latency_ms }} ms{% else %}Unreachable · {{ h.error }}{% endif %}
-            icon: mdi:server
-            color: >-
-              {% set h = (state_attr(entity, 'hosts') or []) | selectattr('name', 'eq', 'Odin') | list | first | default(none) %}
-              {{ 'green' if h and h.ok else 'red' if h else 'disabled' }}
-            tap_action:
-              action: more-info
-            card_mod:
-              style: |
-                ha-card { background: none !important; border: none !important; box-shadow: none !important; padding: 0 !important; }
-                ha-tile-info { --tile-info-primary-font-size: 20px !important; --tile-info-primary-line-height: 26px !important; --tile-info-primary-font-weight: 500 !important; }
-
-          - type: custom:auto-entities
-            grid_options:
-              columns: full
-            show_empty: true
-            card:
-              type: grid
-              columns: 1
-              square: false
-            card_param: cards
-            filter:
-              include:
-                - entity_id: switch.docker_odin_*
-                  options: &container_tile
-                    type: custom:mushroom-template-card
-                    entity: this.entity_id
-                    # Host and container come from the entity id
-                    # (switch.docker_<host>_<container>) and are compared with
-                    # the bridge's "Host/container" names, ignoring case and
-                    # punctuation, to find this container's problems/log volume.
-                    primary: >-
-                      {% set host = entity.split('.')[1].split('_')[1] %}
-                      {{ state_attr(entity, 'friendly_name') | regex_replace('(?i)^(docker[\s_-]+)?' ~ host ~ '[\s_-]+', '') }}
-                    secondary: >-
-                      {% set id = entity.split('.')[1].split('_', 2) %}
-                      {% set key = id[1] ~ '/' ~ (id[2] if id | length > 2 else '') | regex_replace('[^a-z0-9]', '') %}
-                      {% set ns = namespace(problem='', lines=0) %}
-                      {% for p in state_attr('sensor.docker_log_health', 'problems') or [] %}
-                        {% if p.partition(': ')[0] | lower | regex_replace('[^a-z0-9/]', '') == key %}{% set ns.problem = p.partition(': ')[2] %}{% endif %}
-                      {% endfor %}
-                      {% for n in state_attr('sensor.docker_log_health', 'noisiest') or [] %}
-                        {% if n.container | lower | regex_replace('[^a-z0-9/]', '') == key %}{% set ns.lines = n.lines %}{% endif %}
-                      {% endfor %}
-                      {# Short form; the full text is in the Container state card. #}
-                      {% set short = ns.problem.split(' - ')[0].split(' (')[0] | replace('started during window, ', 'restarted ') %}
-                      {% if ns.problem %}{{ short | capitalize }}
-                      {% elif is_state(entity, 'off') %}Stopped
-                      {% elif ns.lines %}Running · {{ ns.lines }} log lines
-                      {% else %}Running{% endif %}
-                    icon: mdi:docker
-                    color: >-
-                      {% set id = entity.split('.')[1].split('_', 2) %}
-                      {% set key = id[1] ~ '/' ~ (id[2] if id | length > 2 else '') | regex_replace('[^a-z0-9]', '') %}
-                      {% set ns = namespace(problem='') %}
-                      {% for p in state_attr('sensor.docker_log_health', 'problems') or [] %}
-                        {% if p.partition(': ')[0] | lower | regex_replace('[^a-z0-9/]', '') == key %}{% set ns.problem = p.partition(': ')[2] %}{% endif %}
-                      {% endfor %}
-                      {% if 'UNHEALTHY' in ns.problem or 'stopped' in ns.problem or 'restart loop' in ns.problem %}red
-                      {% elif ns.problem %}amber
-                      {% elif is_state(entity, 'on') %}blue
-                      {% else %}disabled{% endif %}
-                    features_position: inline
-                    features:
-                      - type: toggle
-                    tap_action:
-                      action: more-info
-                    icon_tap_action:
-                      action: more-info
-            sort:
-              method: name
-              ignore_case: true
-            else:
-              type: markdown
-              content: _No `switch.docker_odin_*` entities found._
-
-      # ── Thor ──────────────────────────────────────────────────────────────
-      - type: grid
-        cards:
-          - type: custom:mushroom-template-card
-            entity: sensor.docker_hosts_online
-            grid_options:
-              columns: full
-            primary: Thor
-            secondary: >-
-              {% set h = (state_attr(entity, 'hosts') or []) | selectattr('name', 'eq', 'Thor') | list | first | default(none) %}
-              {% if h is none %}Not reported by the bridge{% elif h.ok %}{{ h.running }} of {{ h.containers }} running · {{ h.latency_ms }} ms{% else %}Unreachable · {{ h.error }}{% endif %}
-            icon: mdi:server
-            color: >-
-              {% set h = (state_attr(entity, 'hosts') or []) | selectattr('name', 'eq', 'Thor') | list | first | default(none) %}
-              {{ 'green' if h and h.ok else 'red' if h else 'disabled' }}
-            tap_action:
-              action: more-info
-            card_mod:
-              style: |
-                ha-card { background: none !important; border: none !important; box-shadow: none !important; padding: 0 !important; }
-                ha-tile-info { --tile-info-primary-font-size: 20px !important; --tile-info-primary-line-height: 26px !important; --tile-info-primary-font-weight: 500 !important; }
-
-          - type: custom:auto-entities
-            grid_options:
-              columns: full
-            show_empty: true
-            card:
-              type: grid
-              columns: 1
-              square: false
-            card_param: cards
-            filter:
-              include:
-                - entity_id: switch.docker_thor_*
-                  options: *container_tile
-            sort:
-              method: name
-              ignore_case: true
-            else:
-              type: markdown
-              content: _No `switch.docker_thor_*` entities found._
-
-      # ── Mjolnir ──────────────────────────────────────────────────────────────
-      - type: grid
-        cards:
-          - type: custom:mushroom-template-card
-            entity: sensor.docker_hosts_online
-            grid_options:
-              columns: full
-            primary: Mjolnir
-            secondary: >-
-              {% set h = (state_attr(entity, 'hosts') or []) | selectattr('name', 'eq', 'Mjolnir') | list | first | default(none) %}
-              {% if h is none %}Not reported by the bridge{% elif h.ok %}{{ h.running }} of {{ h.containers }} running · {{ h.latency_ms }} ms{% else %}Unreachable · {{ h.error }}{% endif %}
-            icon: mdi:server
-            color: >-
-              {% set h = (state_attr(entity, 'hosts') or []) | selectattr('name', 'eq', 'Mjolnir') | list | first | default(none) %}
-              {{ 'green' if h and h.ok else 'red' if h else 'disabled' }}
-            tap_action:
-              action: more-info
-            card_mod:
-              style: |
-                ha-card { background: none !important; border: none !important; box-shadow: none !important; padding: 0 !important; }
-                ha-tile-info { --tile-info-primary-font-size: 20px !important; --tile-info-primary-line-height: 26px !important; --tile-info-primary-font-weight: 500 !important; }
-
-          - type: custom:auto-entities
-            grid_options:
-              columns: full
-            show_empty: true
-            card:
-              type: grid
-              columns: 1
-              square: false
-            card_param: cards
-            filter:
-              include:
-                - entity_id: switch.docker_mjolnir_*
-                  options: *container_tile
-            sort:
-              method: name
-              ignore_case: true
-            else:
-              type: markdown
-              content: _No `switch.docker_mjolnir_*` entities found._

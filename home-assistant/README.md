@@ -101,9 +101,10 @@ A status page for the latest check:
 - **Top:** the AI's verdict and issues, container state problems, the noisiest
   containers, 24-hour trends, a timeline of recent analyses, and a **Run check
   now** button.
-- **Bottom:** one column per Docker host. The header shows whether the bridge can
-  reach the host, how many containers are running, and the latency. Below it,
-  each container gets a power toggle. Its tile turns red when the log check
+- **Containers** (under the charts): one column per Docker host. The header shows
+  whether the bridge can reach the host, how many containers are running, and
+  the latency. Below it, each container gets a power toggle, and **tapping its
+  icon restarts it** after a confirmation (hold the tile for its details). Its tile turns red when the log check
   flags it (unhealthy, restart loop, stopped or OOM-killed), amber when it just
   restarted, and grey when it's stopped. Noisy containers show their log line
   count.
@@ -132,6 +133,7 @@ It creates these entities:
 | `sensor.docker_container_problems` | Number of container state problems (unhealthy, restart loops, …) |
 | `sensor.docker_hosts_online`, `sensor.docker_containers_running` | Polled from the bridge every minute, independent of the schedule |
 | `script.docker_log_analysis_run_now` | Triggers your blueprint automation immediately |
+| `script.docker_container_restart` | Restarts a container via its switch: off, wait until it reports off, on. Works with any integration's container switches |
 
 The sensors fill in on the next run of the blueprint automation, or press
 **Run check now**. They keep their values across restarts.

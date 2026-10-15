@@ -111,3 +111,31 @@ script:
                    | map(attribute='entity_id') | first | default('automation.docker_log_analysis')) }}
         data:
           skip_condition: true
+
+  # Restart a container through its power switch (any integration): turn it
+  # off, wait until it reports off, then turn it back on. The dashboard runs
+  # this when you tap a container tile's icon.
+  docker_container_restart:
+    alias: Restart Docker container
+    icon: mdi:restart
+    mode: parallel
+    fields:
+      entity_id:
+        name: Container switch
+        required: true
+        selector:
+          entity:
+            domain: switch
+    sequence:
+      - if: "{{ is_state(entity_id, 'on') }}"
+        then:
+          - action: switch.turn_off
+            target:
+              entity_id: "{{ entity_id }}"
+          - wait_template: "{{ is_state(entity_id, 'off') }}"
+            timeout: "00:02:00"
+            continue_on_timeout: false
+          - delay: 2
+      - action: switch.turn_on
+        target:
+          entity_id: "{{ entity_id }}"
