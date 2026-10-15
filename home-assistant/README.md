@@ -92,28 +92,47 @@ Example mobile push:
       group: docker
 ```
 
-## Dashboard sensor (optional)
+## 3. Dashboard (optional)
 
-Every run fires a `docker_log_analysis` event, including runs that skip the
-AI because nothing looked wrong. A trigger-based template sensor turns that
-into something you can put on a dashboard:
+![Docker Logs dashboard](dashboard.png)
 
-```yaml
-template:
-  - trigger:
-      - trigger: event
-        event_type: docker_log_analysis
-    sensor:
-      - name: Docker log health
-        unique_id: docker_log_health
-        icon: mdi:docker
-        state: "{{ trigger.event.data.status }}"
-        attributes:
-          summary: "{{ trigger.event.data.summary }}"
-          issues: "{{ trigger.event.data.issues }}"
-          analysed: "{{ trigger.event.data.analysed }}"
-          checked_at: "{{ trigger.event.data.generated_at }}"
-```
+A status page for the latest check. It shows the AI's verdict and issues,
+container state problems, live host reachability, the noisiest containers,
+24-hour trends, and a timeline of recent analyses. It also has a **Run check
+now** button.
+
+**a. Install the cards from HACS (Frontend):** Mushroom, ApexCharts Card and
+card-mod.
+
+**b. Add the package.** It creates the sensors and the "run now" script:
+
+1. If you don't use packages yet, add this to `configuration.yaml`:
+   ```yaml
+   homeassistant:
+     packages: !include_dir_named packages
+   ```
+2. Copy [`packages/docker_log_bridge.yaml`](packages/docker_log_bridge.yaml)
+   to `/config/packages/`. If your bridge isn't on `192.168.250.4:8085`, change
+   the `resource:` URL in it.
+3. Restart Home Assistant.
+
+It creates these entities:
+
+| Entity | |
+|---|---|
+| `sensor.docker_log_health` | `ok` / `warning` / `critical` / `error` (bridge unreachable). Attributes: summary, issues, problems, noisiest, history (last 15 notable runs), … |
+| `sensor.docker_log_errors`, `sensor.docker_log_warnings` | Counts from the latest check, recorded for graphs |
+| `sensor.docker_container_problems` | Number of container state problems (unhealthy, restart loops, …) |
+| `sensor.docker_hosts_online`, `sensor.docker_containers_running` | Polled from the bridge every minute, independent of the schedule |
+| `script.docker_log_analysis_run_now` | Triggers your blueprint automation immediately |
+
+The sensors fill in on the next run of the blueprint automation, or press
+**Run check now**. They keep their values across restarts.
+
+**c. Create the dashboard.** Go to Settings → Dashboards → Add dashboard → "New
+dashboard from scratch". Open it, then ⋮ → Edit → ⋮ → Raw configuration editor,
+and replace everything with
+[`dashboards/docker_logs.yaml`](dashboards/docker_logs.yaml).
 
 ## Costs and tips
 
