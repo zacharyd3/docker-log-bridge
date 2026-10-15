@@ -1,0 +1,16 @@
+# For non-unraid hosts. On unraid use install.sh / unraid-update.sh instead.
+services:
+  docker-log-bridge:
+    build: .
+    container_name: docker-log-bridge
+    restart: unless-stopped
+    ports:
+      - "8084:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      DOCKER_HOSTS: "unix:///var/run/docker.sock|local,tcp://192.168.250.3:2375|Mjolnir,tcp://192.168.250.2:2375|Thor"
+      TZ: "UTC"
+      # API_TOKEN: "change-me"
+      # EXCLUDE_CONTAINERS: "dozzle,docker-log-bridge"
+      # IGNORE_PATTERN: "GET /(api/)?health"

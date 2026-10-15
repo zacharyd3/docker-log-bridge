@@ -1,0 +1,5 @@
+# docker-log-bridge - all pure-Python wheels, no compiler needed.
+docker==7.1.0
+Flask==3.0.3
+waitress==3.0.0
+tzdata==2025.2
