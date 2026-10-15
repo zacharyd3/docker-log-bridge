@@ -96,13 +96,21 @@ Example mobile push:
 
 ![Docker Logs dashboard](dashboard.png)
 
-A status page for the latest check. It shows the AI's verdict and issues,
-container state problems, live host reachability, the noisiest containers,
-24-hour trends, and a timeline of recent analyses. It also has a **Run check
-now** button.
+A status page for the latest check:
 
-**a. Install the cards from HACS (Frontend):** Mushroom, ApexCharts Card and
-card-mod.
+- **Top:** the AI's verdict and issues, container state problems, the noisiest
+  containers, 24-hour trends, a timeline of recent analyses, and a **Run check
+  now** button.
+- **Containers** (under the charts): one column per Docker host. The header shows
+  whether the bridge can reach the host, how many containers are running, and
+  the latency. Below it, each container gets a power toggle, and **tapping its
+  icon restarts it** after a confirmation (hold the tile for its details). Its tile turns red when the log check
+  flags it (unhealthy, restart loop, stopped or OOM-killed), amber when it just
+  restarted, and grey when it's stopped. Noisy containers show their log line
+  count.
+
+**a. Install the cards from HACS (Frontend):** Mushroom, ApexCharts Card,
+card-mod and auto-entities.
 
 **b. Add the package.** It creates the sensors and the "run now" script:
 
@@ -125,6 +133,7 @@ It creates these entities:
 | `sensor.docker_container_problems` | Number of container state problems (unhealthy, restart loops, …) |
 | `sensor.docker_hosts_online`, `sensor.docker_containers_running` | Polled from the bridge every minute, independent of the schedule |
 | `script.docker_log_analysis_run_now` | Triggers your blueprint automation immediately |
+| `script.docker_container_restart` | Restarts a container via its switch: off, wait until it reports off, wait 5 s, on (aborts if it never reports off within 2 min). Works with any integration's container switches |
 
 The sensors fill in on the next run of the blueprint automation, or press
 **Run check now**. They keep their values across restarts.
@@ -133,6 +142,13 @@ The sensors fill in on the next run of the blueprint automation, or press
 dashboard from scratch". Open it, then ⋮ → Edit → ⋮ → Raw configuration editor,
 and replace everything with
 [`dashboards/docker_logs.yaml`](dashboards/docker_logs.yaml).
+
+The container columns list `switch.docker_<host>_*` entities, one switch per
+container, such as the ones the Monitor Docker integration creates. Rename the
+three host sections (Odin, Thor, Mjolnir) to match your `DOCKER_HOSTS`
+labels, or copy one to add a host. A tile is matched to the log check by its
+entity id, so `switch.docker_mjolnir_namecheap_ddns` picks up problems reported
+for `Mjolnir/Namecheap-DDNS`. Case and punctuation are ignored.
 
 ## Costs and tips
 
