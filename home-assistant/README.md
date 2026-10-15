@@ -69,6 +69,7 @@ Then **Create automation** from it.
 | | Minimum level | Everything / Info+ / **Warnings & errors** / Errors only |
 | | Max report size | Characters sent to the AI (~4 per token) |
 | AI analysis | AI Task entity | Empty = your default |
+| | What counts as an issue | **Anything I could fix** (default: also config, path, permission and credential errors, failed imports/jobs, repeated errors) or **Only outages** (crashes, restart loops, health checks, disk, data loss) |
 | | Extra instructions | Context about your setup, things to ignore |
 | | Skip AI when nothing looks wrong | Default on: no AI call (and no cost) on quiet windows |
 | Notifications | Notify at | Warning or worse / Critical only |

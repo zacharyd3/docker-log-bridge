@@ -161,6 +161,23 @@ blueprint:
           selector:
             text:
               multiline: true
+        strictness:
+          name: What counts as an issue
+          description: >
+            "Anything I could fix" reports every error you could act on, even
+            when the container keeps running: a failed import, a missing path
+            or permission, bad credentials, a misconfigured integration, or a
+            job that keeps failing. "Only outages" reports only things that are
+            down or at risk: crashes, restart loops, failing health checks,
+            unreachable hosts, full disks and data-loss risks.
+          default: fixable
+          selector:
+            select:
+              options:
+                - label: Anything I could fix (recommended)
+                  value: fixable
+                - label: Only outages and failures
+                  value: outages
         skip_when_quiet:
           name: Skip AI when nothing looks wrong
           description: >
@@ -225,6 +242,7 @@ variables:
   ai_task_entity: !input ai_task_entity
   extra_instructions: !input extra_instructions
   skip_when_quiet: !input skip_when_quiet
+  strictness: !input strictness
   min_severity: !input min_severity
   persistent_notification: !input persistent_notification
   notify_bridge_errors: !input notify_bridge_errors
@@ -318,17 +336,41 @@ actions:
         above them. [E]/[W]/[I]/[D] levels are a keyword heuristic and can be wrong.
 
         Decide whether anything needs the owner's attention.
-        - Prioritise: unreachable hosts, crash or restart loops, failing health checks,
-          OOM kills, disk-full / database / filesystem errors, persistent connection or
-          authentication failures, and anything that risks data loss.
-        - Treat as noise unless it is persistent or escalating: single timeouts that recover,
-          deprecation notices, debug chatter, normal startup messages, routine HTTP access logs.
-        - A container that "started during window" may just have been updated; only flag it if
+        {%- if strictness == 'outages' %}
+        The owner only wants outages and failures reported:
+        - Report: unreachable hosts, crash or restart loops, failing health checks, OOM kills,
+          disk-full / database / filesystem errors, persistent connection or authentication
+          failures, and anything that risks data loss.
+        - Do not report configuration problems while the service is otherwise running.
+        {%- else %}
+        The owner wants to know about anything they could fix or tune, not just outages.
+        A container that is up but failing at its job is an issue. Report:
+        - Anything in the outage list: unreachable hosts, crash or restart loops, failing
+          health checks, OOM kills, disk-full / database / filesystem errors, data-loss risk.
+        - Errors where the app can't do what it's for, even though the container is running:
+          failed imports, downloads, backups, syncs or scheduled jobs; a "path does not exist",
+          "permission denied" or "not accessible" error; a missing mount or volume; bad or
+          expired credentials or API keys; an integration that fails to load or set up; a
+          dependency (database, broker, upstream API, another container) it can't reach.
+        - Any error-level message that repeats in the window, and any warning that repeats
+          many times. Something that recurs is not transient.
+        - Misconfiguration you can see in the logs, with the setting to change.
+        A configuration or permission error IS actionable: never call it "just a config issue"
+        or "not an active failure". Explain what is broken because of it, e.g. "Radarr can't
+        import this movie, so it never reaches the library".
+        {%- endif %}
+        - Treat as noise only if it is one-off and recovered, or normal operation: a single
+          timeout followed by success, deprecation notices, debug chatter, normal startup
+          messages, routine HTTP access logs, health-check pings.
+        - A container that "started during window" may just have been updated. Only flag it if
           its logs show it failing.
         - Merge issues that share a root cause, even across containers or hosts.
-        - Be specific: name host/container, quote the key error briefly, and give the most
-          likely cause and fix. Do not invent problems that are not in the report.
-        - If nothing is actionable, status must be "ok" and issues empty.
+        - Be specific: name host/container, quote the key error briefly, say what it breaks,
+          and give the most likely cause and the concrete fix (which setting, path mapping,
+          permission or container to change). Do not invent problems that are not in the report.
+        - Status: "critical" if something is down or data is at risk now; "warning" for anything
+          else you reported; "ok" only if there is nothing to report, in which case issues is
+          empty.
         {%- if extra_instructions | trim %}
 
         Notes from the owner about this setup:
@@ -348,8 +390,9 @@ actions:
           structure: &ai_structure
             status:
               description: >-
-                ok = nothing actionable; warning = should be looked at soon;
-                critical = something is broken now or data is at risk.
+                ok = nothing to report; warning = something the owner should fix
+                (including config, path or permission errors); critical = something is
+                down or data is at risk now.
               required: true
               selector:
                 select:
