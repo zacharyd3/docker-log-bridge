@@ -14,7 +14,9 @@ COPY bridge/ ./bridge/
 
 EXPOSE 8080
 
+# 127.0.0.1, not localhost: busybox wget tries ::1 first and waitress only
+# listens on IPv4, which left the container permanently "unhealthy".
 HEALTHCHECK --interval=30s --timeout=3s --retries=3 \
-    CMD wget -qO- "http://localhost:${PORT}/api/health" >/dev/null 2>&1 || exit 1
+    CMD wget -qO- "http://127.0.0.1:${PORT}/api/health" >/dev/null 2>&1 || exit 1
 
 CMD ["python", "-m", "bridge.app"]

@@ -102,3 +102,38 @@ def test_repeated_traceback_frames_are_swallowed():
     _feed(clog, block * 5 + ["done"])
     assert [e.text for e in clog.entries] == ["ERROR - Database is locked", "done"]
     assert clog.entries[0].count == 5 and len(clog.entries[0].extra) == 3
+
+
+# Real lines from an unraid box that were mis-levelled by keyword guessing.
+@pytest.mark.parametrize("line,level", [
+    ("[22:30:42] [Server thread/INFO] [de.sa.ep.Epitaphs/]: No players found, skipping save", "info"),
+    ("[22:26:20] [Server thread/WARN] [minecraft/MinecraftServer]: Can't keep up! Is the server overloaded?", "warning"),
+    ("2026-10-15T22:30:00.500Z [debug][Plex Scan]: GUIDs are cached. Skipping metadata request.", "debug"),
+    ("[Error] DownloadedMovieImportService: Import failed, path does not exist", "error"),
+    ("[Warn] Torznab: Indexer rss sync didn't cover the period", "warning"),
+    ("2026-10-15 18:26:55,680::INFO::main.py::IP for plex.example.org updated successfully", "info"),
+    ("GET /error/page 404", "error"),  # no tag -> keyword fallback still works
+])
+def test_detect_level_app_tags(line, level):
+    assert detect_level(line) == level
+
+
+def test_long_traceback_keeps_head_and_tail():
+    clog = ContainerLog("h", "c")
+    frames = [f'  File "/app/m{i}.py", line {i}, in f{i}' for i in range(40)]
+    _feed(clog, ["ERROR boom", "Traceback (most recent call last):", *frames, "ValueError: the real cause"])
+    out = format_entry(clog.entries[0], timezone.utc)
+    assert out[1].strip().startswith("Traceback")
+    assert out[-1].strip() == "ValueError: the real cause"
+    assert any("more lines" in line for line in out)
+    assert len(out) == 1 + 3 + 1 + 8
+
+
+def test_health_output_strips_progress_meter():
+    from bridge.collector import _clean_health_output
+    raw = ("Health check exceeded timeout (30s):   % Total    % Received % Xferd  Average Speed   Time\n"
+           "                                 Dload  Upload   Total   Spent    Left  Speed\n"
+           "\r  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0\r  0     0    0")
+    assert _clean_health_output(raw) == "Health check exceeded timeout (30s):"
+    assert _clean_health_output("PONG\n") == "PONG"
+    assert _clean_health_output(None) == ""

@@ -25,9 +25,14 @@ _KV_LEVEL_RE = re.compile(
     r"""(?:\blevel|\blvl|\bseverity|\bloglevel)["']?\s*[:=]\s*["']?([a-z]+)""",
     re.IGNORECASE,
 )
-#   [ERROR]  [warn]  <E>  ERROR:  WARN  |ERROR|  E0101 (glog/klog)
+#   [debug]  [Error]  [Warn]  - any case when bracketed on its own
+_BRACKET_LEVEL_RE = re.compile(
+    r"\[(trace|debug|dbg|info|inf|notice|warning|warn|wrn|error|err|critical|crit|fatal|panic|severe)\]",
+    re.IGNORECASE,
+)
+#   ERROR:  WARN  |ERROR|  [Server thread/WARN]  ::INFO::  <E>
 _TAG_LEVEL_RE = re.compile(
-    r"""(?:^|[\s\[<(|])(TRACE|DEBUG|DBG|INFO|INF|NOTICE|WARNING|WARN|WRN|ERROR|ERR|"""
+    r"""(?:^|[\s\[<(|/:])(TRACE|DEBUG|DBG|INFO|INF|NOTICE|WARNING|WARN|WRN|ERROR|ERR|"""
     r"""CRITICAL|CRIT|FATAL|FTL|PANIC|ALERT|EMERG|SEVERE)(?=$|[\s\]>)|:,-])""",
 )
 _GLOG_RE = re.compile(r"^([IWEF])\d{4} \d\d:\d\d:\d\d")
@@ -83,7 +88,7 @@ def detect_level(line: str) -> str:
     m = _GLOG_RE.match(line)
     if m:
         return _GLOG_LEVELS[m.group(1)]
-    m = _TAG_LEVEL_RE.search(line[:120])
+    m = _BRACKET_LEVEL_RE.search(line[:120]) or _TAG_LEVEL_RE.search(line[:120])
     if m:
         return _LEVEL_WORDS.get(m.group(1).lower(), "info")
     if _ERROR_WORDS_RE.search(line):
@@ -137,7 +142,7 @@ class ContainerLog:
     host: str
     name: str
     max_unique: int = 20000
-    max_continuation: int = 30
+    max_continuation: int = 300  # stored; format_entry shows head + tail
     ignore: re.Pattern | None = None
 
     raw_lines: int = 0
@@ -211,6 +216,7 @@ class ContainerLog:
 
 
 LEVEL_TAG = {"debug": "D", "info": "I", "warning": "W", "error": "E"}
+TRACE_HEAD, TRACE_TAIL = 3, 8
 
 
 def format_entry(entry: Entry, tz, with_time: bool = True) -> list[str]:
@@ -225,5 +231,10 @@ def format_entry(entry: Entry, tz, with_time: bool = True) -> list[str]:
         parts.append(f"(x{entry.count}{span})")
     parts.append(entry.text)
     lines = [" ".join(parts)]
-    lines.extend(f"    {x.strip()}" for x in entry.extra)
+    extra = entry.extra
+    # Long stack traces: the first frames say where, the last say what.
+    if len(extra) > TRACE_HEAD + TRACE_TAIL + 1:
+        skipped = len(extra) - TRACE_HEAD - TRACE_TAIL
+        extra = extra[:TRACE_HEAD] + [f"... {skipped} more lines ..."] + extra[-TRACE_TAIL:]
+    lines.extend(f"    {x.strip()}" for x in extra)
     return lines

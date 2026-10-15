@@ -144,7 +144,7 @@ class Collector:
                 "oom_killed": bool(state.get("OOMKilled")),
                 "error": state.get("Error") or "",
                 "health": health.get("Status"),
-                "health_log": ((health.get("Log") or [{}])[-1].get("Output") or "").strip()[:300],
+                "health_log": _clean_health_output((health.get("Log") or [{}])[-1].get("Output")),
                 "restart_count": attrs.get("RestartCount", 0),
                 "started_at": _parse_docker_time(state.get("StartedAt")),
                 "finished_at": _parse_docker_time(state.get("FinishedAt")),
@@ -398,6 +398,16 @@ def _state_problems(containers: list[dict], since: datetime, now: datetime) -> l
             out.append(f"{who}: health check still 'starting' after "
                        f"{int((now - c['started_at']).total_seconds() // 60)} min")
     return out
+
+
+_PROGRESS_RE = re.compile(r"^[\s\d.:%kKMG-]*$|^\s*% Total|^\s*Dload")
+
+
+def _clean_health_output(output: str | None) -> str:
+    """Last health-check output, minus curl/wget progress meters and blank lines."""
+    lines = [re.sub(r"\s*% Total.*$", "", ln).strip() for ln in re.split(r"[\r\n]+", output or "")]
+    lines = [ln for ln in lines if ln and not _PROGRESS_RE.match(ln)]
+    return " | ".join(lines)[:300]
 
 
 def _restarts(c: dict) -> str:
