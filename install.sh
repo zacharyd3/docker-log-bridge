@@ -13,7 +13,9 @@ SRC=/mnt/user/appdata/docker-log-bridge-src       # build context (throwaway)
 DATA=/mnt/user/appdata/docker-log-bridge          # persistent: bridge.env
 NAME=DockerLogBridge
 IMAGE=docker-log-bridge:latest
-PORT=8084                                         # host port -> container :8080
+PORT=8084                                         # preferred host port -> container :8080
+                                                  # (if taken, the next free one is picked and
+                                                  #  saved as HOST_PORT in bridge.env)
 REPO=zacharyd3/docker-log-bridge
 BRANCH=main
 
@@ -29,6 +31,10 @@ if [ ! -f "$ENV_FILE" ]; then
   cat > "$ENV_FILE" <<'EOF'
 # docker-log-bridge overrides - KEY=value, no quotes, no `export`.
 # Anything set here wins over the defaults in install.sh.
+
+# Host port for the API (Home Assistant's "Bridge URL" uses it). Set
+# automatically on install if the default 8084 is taken:
+#HOST_PORT=8084
 
 # Docker hosts, same format as Dozzle (url|Label, comma-separated):
 #DOCKER_HOSTS=unix:///var/run/docker.sock|Unraid,tcp://192.168.250.3:2375|Mjolnir,tcp://192.168.250.2:2375|Thor
@@ -86,6 +92,39 @@ docker build -t "$IMAGE" .
 echo "==> Recreating container ($NAME)"
 docker stop "$NAME" 2>/dev/null || true
 docker rm   "$NAME" 2>/dev/null || true
+
+# Pick the host port. HOST_PORT in bridge.env wins; otherwise use $PORT, or
+# the next free port after it - and save that choice so it never moves.
+port_users() {
+  docker ps --format '{{.Names}} {{.Ports}}' | grep -E "(^| |,)(0\.0\.0\.0|\[?::\]?|[0-9.]+):$1->" || true
+  if command -v ss >/dev/null 2>&1; then
+    ss -ltnH "( sport = :$1 )" 2>/dev/null | sed 's/^/listening: /' || true
+  fi
+}
+SAVED_PORT=$(sed -n 's/^[[:space:]]*HOST_PORT=\([0-9][0-9]*\).*/\1/p' "$ENV_FILE" | tail -n1)
+if [ -n "$SAVED_PORT" ]; then
+  PORT=$SAVED_PORT
+  if [ -n "$(port_users "$PORT")" ]; then
+    echo "!! Port $PORT (HOST_PORT in $ENV_FILE) is already in use by:" >&2
+    port_users "$PORT" | sed 's/^/     /' >&2
+    echo "   Change or remove HOST_PORT in $ENV_FILE and re-run." >&2
+    exit 1
+  fi
+else
+  WANTED=$PORT
+  while [ -n "$(port_users "$PORT")" ]; do
+    PORT=$((PORT + 1))
+    if [ "$PORT" -gt $((WANTED + 200)) ]; then
+      echo "!! No free port found between $WANTED and $PORT - set HOST_PORT in $ENV_FILE" >&2
+      exit 1
+    fi
+  done
+  if [ "$PORT" != "$WANTED" ]; then
+    echo "==> Port $WANTED is taken ($(port_users "$WANTED" | head -n1 | cut -d' ' -f1)); using $PORT"
+    echo "    Saved as HOST_PORT=$PORT in $ENV_FILE so it stays put on updates."
+  fi
+  printf '\n# Chosen by install.sh - change it here if you need a different port.\nHOST_PORT=%s\n' "$PORT" >> "$ENV_FILE"
+fi
 docker run -d \
   --name "$NAME" \
   -p "${PORT}:8080" \
@@ -100,7 +139,7 @@ docker run -d \
 # Drop the dangling image the rebuild left behind.
 docker image prune -f >/dev/null 2>&1 || true
 
-HOST_IP=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "src") print $(i + 1)}')
+HOST_IP=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "src") print $(i + 1)}' || true)
 HOST_IP=${HOST_IP:-localhost}
 
 echo "==> Waiting for the API"
@@ -118,5 +157,6 @@ curl -fs ${TOKEN:+-H "Authorization: Bearer $TOKEN"} "http://localhost:${PORT}/a
 echo
 
 echo "==> Done. docker-log-bridge is up on http://${HOST_IP}:${PORT}/"
+echo "    Home Assistant blueprint \"Bridge URL\": http://${HOST_IP}:${PORT}"
 echo "    Try it:   curl -s 'http://${HOST_IP}:${PORT}/api/logs?minutes=10&format=text'"
 echo "    Settings: $ENV_FILE (re-run this script after editing)"

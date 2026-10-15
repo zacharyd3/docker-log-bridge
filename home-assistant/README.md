@@ -60,7 +60,7 @@ Then **Create automation** from it.
 
 | Section | Option | Notes |
 |---|---|---|
-| Bridge | Bridge URL | `http://192.168.250.4:8084` by default |
+| Bridge | Bridge URL | `http://192.168.250.4:8084` by default; use the URL install.sh printed |
 | Schedule | Run every | 5 / 10 / 15 / 20 / 30 min |
 | | Look back | 0 = same as the interval (every line is analysed exactly once) |
 | What to read | Docker hosts | Labels from `DOCKER_HOSTS`, e.g. `Thor, Mjolnir`; empty = all |
