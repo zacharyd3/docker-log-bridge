@@ -1,0 +1,113 @@
+# docker-log-bridge: entities for the Docker Logs dashboard.
+#
+# Drop this file in /config/packages/ (see home-assistant/README.md) and
+# restart. It needs the "Docker log analysis" blueprint automation running:
+# every run fires a `docker_log_analysis` event and these sensors keep the
+# latest one (and survive restarts).
+#
+# Change the bridge URL in the `rest:` block below if yours isn't :8085.
+
+template:
+  - trigger:
+      - trigger: event
+        event_type: docker_log_analysis
+    sensor:
+      - name: Docker log health
+        unique_id: docker_log_health
+        icon: >-
+          {{ {'ok': 'mdi:check-circle', 'warning': 'mdi:alert', 'critical': 'mdi:alert-octagon',
+              'error': 'mdi:lan-disconnect'}.get(trigger.event.data.status, 'mdi:help-circle') }}
+        state: "{{ trigger.event.data.status }}"
+        attributes:
+          summary: "{{ trigger.event.data.summary }}"
+          issues: "{{ trigger.event.data.issues | default('') }}"
+          analysed: "{{ trigger.event.data.analysed | default(false) }}"
+          checked_at: "{{ trigger.event.data.generated_at | default(now().isoformat()) }}"
+          window_minutes: "{{ trigger.event.data.window_minutes | default(10) }}"
+          automation: "{{ trigger.event.data.automation | default('') }}"
+          # Bridge-side details; keep the last known values when the bridge was unreachable.
+          problems: >-
+            {{ trigger.event.data.problems if trigger.event.data.problems is defined
+               else this.attributes.problems | default([]) }}
+          hosts_down: >-
+            {{ trigger.event.data.hosts_down if trigger.event.data.hosts_down is defined
+               else this.attributes.hosts_down | default([]) }}
+          noisiest: >-
+            {{ trigger.event.data.noisiest if trigger.event.data.noisiest is defined
+               else this.attributes.noisiest | default([]) }}
+          containers_scanned: "{{ trigger.event.data.containers_scanned | default(this.attributes.containers_scanned | default(0)) }}"
+          containers_with_output: "{{ trigger.event.data.containers_with_output | default(this.attributes.containers_with_output | default(0)) }}"
+          raw_lines: "{{ trigger.event.data.raw_lines | default(this.attributes.raw_lines | default(0)) }}"
+          elapsed_ms: "{{ trigger.event.data.elapsed_ms | default(none) }}"
+          # Rolling log of the last 15 runs where the AI looked at something or the
+          # status changed (quiet "ok" runs every 10 minutes would drown it out).
+          history: >-
+            {% set d = trigger.event.data %}
+            {% set old = this.attributes.history | default([]) %}
+            {% if d.analysed | default(false) or d.status != this.state %}
+              {% set entry = {'at': d.generated_at | default(now().isoformat()), 'status': d.status,
+                              'summary': d.summary, 'issues': d.issues | default(''),
+                              'analysed': d.analysed | default(false)} %}
+              {{ ([entry] + old)[:15] }}
+            {% else %}
+              {{ old }}
+            {% endif %}
+
+      - name: Docker log errors
+        unique_id: docker_log_errors
+        icon: mdi:alert-circle-outline
+        unit_of_measurement: lines
+        state_class: measurement
+        state: >-
+          {{ trigger.event.data.errors | int if trigger.event.data.errors is defined else (this.state | int(none)) }}
+
+      - name: Docker log warnings
+        unique_id: docker_log_warnings
+        icon: mdi:alert-outline
+        unit_of_measurement: lines
+        state_class: measurement
+        state: >-
+          {{ trigger.event.data.warnings | int if trigger.event.data.warnings is defined else (this.state | int(none)) }}
+
+      - name: Docker container problems
+        unique_id: docker_container_problems
+        icon: mdi:docker
+        unit_of_measurement: containers
+        state_class: measurement
+        state: >-
+          {{ (trigger.event.data.problems | length) if trigger.event.data.problems is defined else (this.state | int(none)) }}
+
+# Live reachability of each Docker host, independent of the analysis schedule.
+rest:
+  - resource: http://192.168.250.4:8085/api/hosts
+    scan_interval: 60
+    timeout: 30
+    sensor:
+      - name: Docker hosts online
+        unique_id: docker_hosts_online
+        icon: mdi:server-network
+        unit_of_measurement: hosts
+        value_template: "{{ value_json.hosts | selectattr('ok') | list | count }}"
+        json_attributes:
+          - hosts
+      - name: Docker containers running
+        unique_id: docker_containers_running
+        icon: mdi:docker
+        unit_of_measurement: containers
+        state_class: measurement
+        value_template: "{{ value_json.hosts | selectattr('ok') | map(attribute='running') | sum }}"
+
+script:
+  docker_log_analysis_run_now:
+    alias: Run Docker log analysis now
+    icon: mdi:play-circle
+    mode: single
+    sequence:
+      - action: automation.trigger
+        target:
+          entity_id: >-
+            {{ state_attr('sensor.docker_log_health', 'automation')
+               or (states.automation | selectattr('attributes.friendly_name', 'search', '(?i)docker')
+                   | map(attribute='entity_id') | first | default('automation.docker_log_analysis')) }}
+        data:
+          skip_condition: true

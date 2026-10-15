@@ -14,7 +14,8 @@ blueprint:
 
 
     Every run also fires a `docker_log_analysis` event (status, summary,
-    issues, ...) so you can feed a template sensor or a dashboard card.
+    issues, counts, hosts, ...). The package and dashboard in the repo's
+    `home-assistant/` folder turn it into a status page.
   domain: automation
   source_url: https://github.com/zacharyd3/docker-log-bridge/blob/main/home-assistant/blueprints/docker_log_analysis.yaml
   homeassistant:
@@ -265,6 +266,15 @@ actions:
                 {{ (bridge.content | default('') | string)[:300] }}){% endif %}.
                 Check that the container is running and that
                 rest_command.docker_log_bridge is configured.
+      - event: docker_log_analysis
+        event_data:
+          status: error
+          summary: Couldn't reach the docker-log-bridge at {{ bridge_url }}.
+          issues: ""
+          analysed: false
+          automation: "{{ this.entity_id }}"
+          window_minutes: "{{ window_minutes }}"
+          generated_at: "{{ now().isoformat(timespec='seconds') }}"
       - stop: Bridge request failed
 
   - action: persistent_notification.dismiss
@@ -282,8 +292,21 @@ actions:
           summary: No warnings, errors or container problems in the last {{ window_minutes }} minutes.
           issues: ""
           analysed: false
-          window_minutes: "{{ window_minutes }}"
-          generated_at: "{{ report.generated_at }}"
+          # Everything a dashboard needs from the bridge's report; reused below.
+          <<: &report_fields
+            automation: "{{ this.entity_id }}"
+            window_minutes: "{{ window_minutes }}"
+            generated_at: "{{ report.generated_at }}"
+            errors: "{{ report.stats.errors }}"
+            warnings: "{{ report.stats.warnings }}"
+            problems: "{{ report.problems }}"
+            hosts_down: "{{ report.hosts_down }}"
+            hosts: "{{ report.hosts }}"
+            noisiest: "{{ report.noisiest | default([]) }}"
+            containers_scanned: "{{ report.stats.containers_scanned }}"
+            containers_with_output: "{{ report.stats.containers_with_output }}"
+            raw_lines: "{{ report.stats.raw_lines }}"
+            elapsed_ms: "{{ report.stats.elapsed_ms | default(none) }}"
       - stop: Nothing worth analysing
 
   - variables:
@@ -381,12 +404,7 @@ actions:
       summary: "{{ analysis.summary }}"
       issues: "{{ analysis.issues }}"
       analysed: true
-      window_minutes: "{{ window_minutes }}"
-      generated_at: "{{ report.generated_at }}"
-      errors: "{{ report.stats.errors }}"
-      warnings: "{{ report.stats.warnings }}"
-      problems: "{{ report.problems }}"
-      hosts_down: "{{ report.hosts_down }}"
+      <<: *report_fields
 
   - condition: template
     value_template: >-

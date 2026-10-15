@@ -1,0 +1,343 @@
+# Docker Logs dashboard: paste into a new dashboard's raw configuration editor.
+# Needs HACS frontend cards: Mushroom, ApexCharts Card, card-mod.
+# Entities come from home-assistant/packages/docker_log_bridge.yaml.
+#
+# Markdown cards: HA strips class/style attributes from markdown HTML, so the
+# layout below is plain markdown (paragraphs, tables, rules) styled through
+# card-mod with element/attribute selectors.
+title: Docker Logs
+views:
+  - title: Docker Logs
+    path: docker-logs
+    icon: mdi:docker
+    type: sections
+    max_columns: 3
+    sections:
+      # ── Status ────────────────────────────────────────────────────────────
+      - type: grid
+        column_span: 2
+        cards:
+          - type: heading
+            heading: Log health
+            icon: mdi:docker
+
+          - type: custom:mushroom-template-card
+            entity: sensor.docker_log_health
+            grid_options:
+              columns: full
+            primary: >-
+              {{ {'ok': 'All clear', 'warning': 'Needs attention', 'critical': 'Critical',
+                  'error': 'Bridge unreachable'}.get(states(entity), 'Waiting for the first check') }}
+            secondary: >-
+              {{ state_attr(entity, 'summary') or 'Nothing has been analysed yet. Run a check or wait for the schedule.' }}
+            icon: >-
+              {{ {'ok': 'mdi:check-circle', 'warning': 'mdi:alert', 'critical': 'mdi:alert-octagon',
+                  'error': 'mdi:lan-disconnect'}.get(states(entity), 'mdi:help-circle') }}
+            color: >-
+              {{ {'ok': 'green', 'warning': 'amber', 'critical': 'red', 'error': 'grey'}.get(states(entity), 'grey') }}
+            icon_color: >-
+              {{ {'ok': 'green', 'warning': 'amber', 'critical': 'red', 'error': 'grey'}.get(states(entity), 'grey') }}
+            multiline_secondary: true
+            tap_action:
+              action: more-info
+            card_mod:
+              style: |
+                {% set c = {'ok': 'green', 'warning': 'amber', 'critical': 'red'}.get(states(config.entity), 'grey') %}
+                ha-card {
+                  padding: 14px 8px !important;
+                  border: 1px solid color-mix(in srgb, var(--{{ c }}-color) 35%, transparent) !important;
+                  background: color-mix(in srgb, var(--{{ c }}-color) 9%, var(--ha-card-background, var(--card-background-color))) !important;
+                }
+                ha-tile-icon {
+                  --tile-icon-size: 52px !important;
+                  --tile-icon-border-radius: 16px !important;
+                  --mdc-icon-size: 30px;
+                }
+                ha-tile-info {
+                  --tile-info-primary-font-size: 22px !important;
+                  --tile-info-primary-line-height: 30px !important;
+                  --tile-info-primary-font-weight: 600 !important;
+                  --tile-info-secondary-font-size: 15px !important;
+                  --tile-info-secondary-line-height: 22px !important;
+                  margin-left: 6px;
+                }
+
+          - type: custom:mushroom-chips-card
+            grid_options:
+              columns: full
+            chips:
+              - type: template
+                entity: sensor.docker_log_health
+                icon: mdi:clock-outline
+                content: >-
+                  {% set t = state_attr('sensor.docker_log_health', 'checked_at') %}
+                  {{ 'Checked ' ~ relative_time(as_datetime(t)) ~ ' ago' if t else 'Never checked' }}
+                tap_action:
+                  action: more-info
+              - type: template
+                icon: mdi:robot-outline
+                icon_color: >-
+                  {{ 'deep-purple' if state_attr('sensor.docker_log_health', 'analysed') else 'grey' }}
+                content: >-
+                  {{ 'AI reviewed' if state_attr('sensor.docker_log_health', 'analysed') else 'Quiet, AI skipped' }}
+              - type: template
+                entity: sensor.docker_log_errors
+                icon: mdi:alert-circle
+                icon_color: "{{ 'red' if states(entity) | int(0) > 0 else 'grey' }}"
+                content: "{{ states(entity) | int(0) }} errors"
+                tap_action:
+                  action: more-info
+              - type: template
+                entity: sensor.docker_log_warnings
+                icon: mdi:alert
+                icon_color: "{{ 'amber' if states(entity) | int(0) > 0 else 'grey' }}"
+                content: "{{ states(entity) | int(0) }} warnings"
+                tap_action:
+                  action: more-info
+              - type: template
+                entity: sensor.docker_hosts_online
+                icon: mdi:server-network
+                icon_color: >-
+                  {% set hosts = state_attr(entity, 'hosts') or [] %}
+                  {{ 'green' if hosts and states(entity) | int(0) == hosts | length else 'red' }}
+                content: >-
+                  {{ states(entity) | int(0) }}/{{ (state_attr(entity, 'hosts') or []) | length }} hosts
+                tap_action:
+                  action: more-info
+              - type: template
+                icon: mdi:play-circle
+                icon_color: primary
+                content: Run check now
+                tap_action:
+                  action: perform-action
+                  perform_action: script.docker_log_analysis_run_now
+                  confirmation:
+                    text: Analyse the Docker logs now? This calls your AI Task entity.
+
+          - type: heading
+            heading: Issues
+            heading_style: subtitle
+            icon: mdi:clipboard-alert-outline
+
+          - type: markdown
+            grid_options:
+              columns: full
+            content: |
+              {% set issues = state_attr('sensor.docker_log_health', 'issues') or '' %}
+              {% if issues | trim %}
+              {{ issues | trim
+                 | regex_replace('(?m)^\s*[-*]\s*([^:\n]+):', '- **\\1**:')
+                 | replace(' -> ', ' → ') }}
+              {% elif states('sensor.docker_log_health') in ['unknown', 'unavailable'] %}
+              _No analysis yet._
+              {% else %}
+              <ha-icon icon="mdi:check-circle-outline"></ha-icon> Nothing needs attention right now.
+              {% endif %}
+            card_mod:
+              style:
+                ha-markdown$: |
+                  ul { padding-left: 20px; margin: 0; }
+                  li { margin: 6px 0; line-height: 1.55; }
+                  li::marker { color: var(--secondary-text-color); }
+                  ha-icon { color: var(--green-color); --mdc-icon-size: 20px; vertical-align: -4px; }
+
+          - type: heading
+            heading: Container state
+            heading_style: subtitle
+            icon: mdi:docker
+            visibility: &has_problems
+              - condition: numeric_state
+                entity: sensor.docker_container_problems
+                above: 0
+
+          - type: markdown
+            visibility: *has_problems
+            grid_options:
+              columns: full
+            content: |
+              {% set icons = {'UNHEALTHY': 'heart-broken', 'restart': 'restart-alert', 'stopped': 'stop-circle-outline', 'still': 'timer-sand'} %}
+              {% for p in state_attr('sensor.docker_log_health', 'problems') or [] %}
+              {% set name, _, detail = p.partition(': ') %}
+              {% set ns = namespace(icon='information-outline') %}
+              {% for k, v in icons.items() if k in detail %}{% set ns.icon = v %}{% endfor %}
+              <ha-icon icon="mdi:{{ ns.icon }}"></ha-icon> **{{ name }}** · {{ detail }}
+
+              {% endfor %}
+            card_mod:
+              style:
+                ha-markdown$: |
+                  p { margin: 6px 0; }
+                  ha-icon { --mdc-icon-size: 18px; vertical-align: -3px; margin-right: 4px; color: var(--secondary-text-color); }
+                  ha-icon[icon="mdi:heart-broken"], ha-icon[icon="mdi:stop-circle-outline"] { color: var(--red-color); }
+                  ha-icon[icon="mdi:restart-alert"], ha-icon[icon="mdi:timer-sand"] { color: var(--amber-color); }
+
+      # ── Hosts ─────────────────────────────────────────────────────────────
+      - type: grid
+        cards:
+          - type: heading
+            heading: Docker hosts
+            icon: mdi:server-network
+            badges:
+              - type: entity
+                entity: sensor.docker_containers_running
+                show_state: true
+                show_icon: true
+                color: blue
+
+          - type: markdown
+            content: |
+              {% set hosts = state_attr('sensor.docker_hosts_online', 'hosts') or [] %}
+              {% for h in hosts %}
+              {% if h.ok %}
+              <ha-icon icon="mdi:check-circle"></ha-icon> **{{ h.name }}**<br>{{ h.running }} of {{ h.containers }} running · {{ h.latency_ms }} ms
+              {% else %}
+              <ha-icon icon="mdi:close-circle"></ha-icon> **{{ h.name }}**<br>_{{ h.error }}_
+              {% endif %}
+
+              {% else %}
+              _Waiting for the bridge…_
+              {% endfor %}
+            card_mod:
+              style:
+                ha-markdown$: |
+                  p { margin: 0; padding: 10px 0 10px 32px; position: relative; color: var(--secondary-text-color); font-size: 14px; }
+                  p + p { border-top: 1px solid var(--divider-color); }
+                  strong { color: var(--primary-text-color); font-size: 15px; }
+                  ha-icon { position: absolute; left: 0; top: 11px; --mdc-icon-size: 22px; color: var(--green-color); }
+                  ha-icon[icon="mdi:close-circle"] { color: var(--red-color); }
+
+          - type: heading
+            heading: Noisiest containers
+            heading_style: subtitle
+            icon: mdi:volume-high
+
+          - type: markdown
+            content: |
+              {% set n = state_attr('sensor.docker_log_health', 'noisiest') or [] %}
+              {% if n %}
+              | Container | Lines |
+              |:--|--:|
+              {% for x in n %}| {{ x.container }} | {{ x.lines }} |
+              {% endfor %}
+              {% else %}
+              _No output yet._
+              {% endif %}
+
+              Lines in the last {{ state_attr('sensor.docker_log_health', 'window_minutes') or 10 }} min · {{ state_attr('sensor.docker_log_health', 'raw_lines') or 0 }} total from {{ state_attr('sensor.docker_log_health', 'containers_with_output') or 0 }} containers
+            card_mod:
+              # Each row gets a proportional bar underneath, drawn as a background.
+              style:
+                ha-markdown$: |
+                  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+                  thead { display: none; }
+                  td { padding: 6px 0 18px !important; border: none !important; background-repeat: no-repeat; background-size: 100% 5px; background-position: left bottom 6px; }
+                  td:last-child { text-align: right; font-variant-numeric: tabular-nums; color: var(--secondary-text-color); }
+                  p { color: var(--secondary-text-color); font-size: 12px; margin-top: 10px; }
+                  {% set n = state_attr('sensor.docker_log_health', 'noisiest') or [] %}
+                  {% set top = (n | map(attribute='lines') | max) if n else 1 %}
+                  {% for x in n %}
+                  {% set pct = (100 * x.lines / top) | round(1) %}
+                  tbody tr:nth-child({{ loop.index }}) td:first-child {
+                    background-image: linear-gradient(90deg, var(--primary-color) {{ pct }}%, var(--divider-color) {{ pct }}%);
+                    background-size: calc(100% + 60px) 5px;
+                  }
+                  tbody tr:nth-child({{ loop.index }}) td:last-child {
+                    background-image: linear-gradient(90deg, var(--divider-color) 100%, transparent 0);
+                  }
+                  {% endfor %}
+
+      # ── Trends ────────────────────────────────────────────────────────────
+      - type: grid
+        column_span: 2
+        cards:
+          - type: heading
+            heading: Last 24 hours
+            icon: mdi:chart-timeline-variant
+
+          - type: custom:apexcharts-card
+            grid_options:
+              columns: full
+            graph_span: 24h
+            header:
+              show: true
+              title: Errors & warnings per check
+              show_states: true
+              colorize_states: true
+            apex_config:
+              chart:
+                height: 220
+              legend:
+                show: false
+              grid:
+                strokeDashArray: 3
+              yaxis:
+                - id: errors
+                  min: 0
+                  forceNiceScale: true
+                  decimalsInFloat: 0
+                  labels:
+                    style:
+                      colors: "#e5484d"
+                - id: warnings
+                  opposite: true
+                  min: 0
+                  forceNiceScale: true
+                  decimalsInFloat: 0
+                  labels:
+                    style:
+                      colors: "#f5a524"
+            series:
+              - entity: sensor.docker_log_errors
+                name: Errors
+                yaxis_id: errors
+                type: column
+                color: "#e5484d"
+                group_by:
+                  func: max
+                  duration: 30min
+              - entity: sensor.docker_log_warnings
+                name: Warnings
+                yaxis_id: warnings
+                type: area
+                curve: smooth
+                stroke_width: 2
+                opacity: 0.15
+                color: "#f5a524"
+                group_by:
+                  func: max
+                  duration: 30min
+
+          - type: history-graph
+            hours_to_show: 24
+            grid_options:
+              columns: full
+            entities:
+              - entity: sensor.docker_log_health
+                name: Status
+
+      # ── Recent analyses ───────────────────────────────────────────────────
+      - type: grid
+        cards:
+          - type: heading
+            heading: Recent analyses
+            icon: mdi:history
+
+          - type: markdown
+            content: |
+              {% set icons = {'ok': 'check-circle', 'warning': 'alert', 'critical': 'alert-octagon', 'error': 'lan-disconnect'} %}
+              {% for h in state_attr('sensor.docker_log_health', 'history') or [] %}
+              <ha-icon icon="mdi:{{ icons.get(h.status, 'help-circle') }}"></ha-icon> **{{ as_timestamp(h.at) | timestamp_custom('%a %H:%M') }}**{{ '' if h.analysed else ' · _no AI_' }}<br>{{ h.summary }}
+
+              {% else %}
+              _Nothing yet. Runs where the AI reviewed something, or the status changed, show up here._
+              {% endfor %}
+            card_mod:
+              style:
+                ha-markdown$: |
+                  p { margin: 0; padding: 10px 0 10px 30px; position: relative; font-size: 14px; line-height: 1.45; }
+                  p + p { border-top: 1px solid var(--divider-color); }
+                  em { color: var(--secondary-text-color); font-style: normal; font-size: 12px; }
+                  ha-icon { position: absolute; left: 0; top: 10px; --mdc-icon-size: 20px; color: var(--secondary-text-color); }
+                  ha-icon[icon="mdi:check-circle"] { color: var(--green-color); }
+                  ha-icon[icon="mdi:alert"] { color: var(--amber-color); }
+                  ha-icon[icon="mdi:alert-octagon"] { color: var(--red-color); }
