@@ -217,7 +217,8 @@ blueprint:
           description: >
             Run when an analysis meets the threshold, e.g. a mobile push.
             Available variables: `analysis.status`, `analysis.summary`,
-            `analysis.issues`, `notification_title`, `notification_message`.
+            `analysis.issues`, `notification_title`, `notification_message`
+            (markdown), and `phone_message` (the same as plain text for mobile pushes).
           default: []
           selector:
             action:
@@ -486,6 +487,15 @@ actions:
         {%- endif %}
 
         _{{ report.since[11:16] }}–{{ report.generated_at[11:16] }} · {{ report.stats.containers_with_output }} containers with output · {{ report.stats.raw_lines }} lines_
+      # Same content as plain text for phone pushes: no markdown, "•" bullets,
+      # "→" arrows, and kept under the ~4 KB push payload limit.
+      phone_message: >-
+        {% set ns = namespace(lines=[ai.data.summary | default('') | trim]) %}
+        {% for l in (issues_text | trim).split('\n') if l | trim %}
+          {% set ns.lines = ns.lines + ['• ' ~ (l | trim | regex_replace('^-\\s*', '') | replace(' -> ', ' → '))] %}
+        {% endfor %}
+        {% set text = ns.lines | join('\n\n') %}
+        {{ text[:3000] ~ ('…' if text | length > 3000 else '') }}
 
   - event: docker_log_analysis
     event_data:
