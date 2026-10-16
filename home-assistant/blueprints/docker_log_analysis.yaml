@@ -364,7 +364,11 @@ actions:
           messages, routine HTTP access logs, health-check pings.
         - A container that "started during window" may just have been updated. Only flag it if
           its logs show it failing.
-        - Merge issues that share a root cause, even across containers or hosts.
+        - Only list a line if it shows something not working or needing a change. Do not
+          report a line just because it contains "warn", "skip" or "empty", or because it is
+          a tip about command-line flags; read what it actually says.
+        - Merge issues that share a root cause, even across containers or hosts. At most 8
+          issues, most important first.
         - Be specific: name host/container, quote the key error briefly, say what it breaks,
           and give the most likely cause and the concrete fix (which setting, path mapping,
           permission or container to change). Do not invent problems that are not in the report.
@@ -407,7 +411,10 @@ actions:
                 text:
             issues:
               description: >-
-                One line per distinct issue, formatted "- host/container: problem -> suggested fix".
+                Plain text, NOT JSON: one line per distinct issue, each formatted exactly
+                "- Host/container: what is wrong and what it breaks -> the fix", e.g.
+                "- Thor/radarr: imports fail, /Downloads/Movies is missing or unreadable, so
+                movies never reach the library -> fix the download client's path mapping".
                 Empty when status is ok.
               required: false
               selector:
@@ -423,20 +430,53 @@ actions:
           structure: *ai_structure
         response_variable: ai
 
+  # Some models (often local ones) return the issues as JSON - a real list or
+  # a string holding one - instead of the requested text lines. Turn either
+  # into "- Host/container: problem. What it breaks -> fix" lines.
+  - variables:
+      issues_text: >-
+        {% set raw = ai.data.issues | default('') %}
+        {% set parsed = raw %}
+        {% if raw is string %}
+          {% set j = raw | trim | regex_replace('^[^\\[\\{]*', '') %}
+          {% set parsed = (j | from_json(default=none)) if j[:1] in ['[', '{'] else none %}
+        {% endif %}
+        {% if parsed is mapping %}{% set parsed = [parsed] %}{% endif %}
+        {% if parsed is not none and parsed is not string and parsed is iterable %}
+          {% set ns = namespace(lines=[]) %}
+          {% for i in parsed %}
+            {% if i is mapping %}
+              {% set who = [i.host, i.container] | select | join('/') %}
+              {% set problem = i.problem or i.message or i.issue or i.description or i.error or '' %}
+              {% set breaks = i.what_it_breaks or i.impact or '' %}
+              {% set fix = i.fix or i.suggested_fix or i.solution or i.action or '' %}
+              {% set line = '- ' ~ (who ~ ': ' if who else '') ~ (problem | string | trim)
+                            ~ ('. ' ~ (breaks | string | trim) if breaks else '')
+                            ~ (' -> ' ~ (fix | string | trim) if fix else '') %}
+            {% else %}
+              {% set line = '- ' ~ (i | string | trim) %}
+            {% endif %}
+            {% set ns.lines = ns.lines + [line] %}
+          {% endfor %}
+          {{ ns.lines | join('\n') }}
+        {% else %}
+          {{ raw | string | trim }}
+        {% endif %}
+
   - variables:
       analysis:
         status: "{{ ai.data.status | default('warning') | lower }}"
         summary: "{{ ai.data.summary | default('The AI returned no summary.') }}"
-        issues: "{{ ai.data.issues | default('') }}"
+        issues: "{{ issues_text }}"
       notification_title: >-
         Docker {{ ai.data.status | default('warning') | lower }}:
         {{ report.stats.errors }} errors / {{ report.stats.warnings }} warnings
         in {{ window_minutes }} min
       notification_message: |-
         {{ ai.data.summary | default('') }}
-        {%- if ai.data.issues | default('') | trim %}
+        {%- if issues_text | trim %}
 
-        {{ ai.data.issues | trim }}
+        {{ issues_text | trim }}
         {%- endif %}
 
         _{{ report.since[11:16] }}–{{ report.generated_at[11:16] }} · {{ report.stats.containers_with_output }} containers with output · {{ report.stats.raw_lines }} lines_
