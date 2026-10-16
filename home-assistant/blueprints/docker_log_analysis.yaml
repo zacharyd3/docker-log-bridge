@@ -217,7 +217,8 @@ blueprint:
           description: >
             Run when an analysis meets the threshold, e.g. a mobile push.
             Available variables: `analysis.status`, `analysis.summary`,
-            `analysis.issues`, `notification_title`, `notification_message`.
+            `analysis.issues`, `notification_title`, `notification_message`
+            (markdown), and `phone_message` (the same as plain text for mobile pushes).
           default: []
           selector:
             action:
@@ -369,6 +370,7 @@ actions:
           a tip about command-line flags; read what it actually says.
         - Merge issues that share a root cause, even across containers or hosts. At most 8
           issues, most important first.
+        - Every problem you mention in the summary must also appear in issues, with its fix.
         - Be specific: name host/container, quote the key error briefly, say what it breaks,
           and give the most likely cause and the concrete fix (which setting, path mapping,
           permission or container to change). Do not invent problems that are not in the report.
@@ -411,15 +413,16 @@ actions:
                 text:
             issues:
               description: >-
-                Plain text, NOT JSON: one line per distinct issue, each formatted exactly
-                "- Host/container: what is wrong and what it breaks -> the fix", e.g.
-                "- Thor/radarr: imports fail, /Downloads/Movies is missing or unreadable, so
-                movies never reach the library -> fix the download client's path mapping".
-                Empty when status is ok.
-              required: false
+                One entry per distinct issue (at most 8, most important first), each a
+                single sentence formatted "Host/container: what is wrong and what it
+                breaks -> the fix", e.g. "Thor/radarr: imports fail because
+                /Downloads/Movies is missing or unreadable, so movies never reach the
+                library -> fix the download client's path mapping". Every problem named
+                in the summary must have an entry. Empty list only when status is ok.
+              required: true
               selector:
                 text:
-                  multiline: true
+                  multiple: true
         response_variable: ai
     else:
       # Same call without entity_id, so HA uses the default AI Task entity.
@@ -436,32 +439,36 @@ actions:
   - variables:
       issues_text: >-
         {% set raw = ai.data.issues | default('') %}
+        {# A one-item list holding a JSON blob or several lines: unwrap it. #}
+        {% if raw is list and raw | length == 1 and raw[0] is string %}{% set raw = raw[0] %}{% endif %}
         {% set parsed = raw %}
         {% if raw is string %}
           {% set j = raw | trim | regex_replace('^[^\\[\\{]*', '') %}
-          {% set parsed = (j | from_json(default=none)) if j[:1] in ['[', '{'] else none %}
+          {% set parsed = (j | from_json(default=none)) if j[:1] in ['[', '{'] else (raw | trim).split('\n') %}
         {% endif %}
         {% if parsed is mapping %}{% set parsed = [parsed] %}{% endif %}
+        {% set ns = namespace(lines=[]) %}
         {% if parsed is not none and parsed is not string and parsed is iterable %}
-          {% set ns = namespace(lines=[]) %}
           {% for i in parsed %}
             {% if i is mapping %}
               {% set who = [i.host, i.container] | select | join('/') %}
               {% set problem = i.problem or i.message or i.issue or i.description or i.error or '' %}
               {% set breaks = i.what_it_breaks or i.impact or '' %}
               {% set fix = i.fix or i.suggested_fix or i.solution or i.action or '' %}
-              {% set line = '- ' ~ (who ~ ': ' if who else '') ~ (problem | string | trim)
+              {% set line = (who ~ ': ' if who else '') ~ (problem | string | trim)
                             ~ ('. ' ~ (breaks | string | trim) if breaks else '')
                             ~ (' -> ' ~ (fix | string | trim) if fix else '') %}
             {% else %}
-              {% set line = '- ' ~ (i | string | trim) %}
+              {% set line = i | string | trim | regex_replace('^[-*•]\\s*', '') %}
             {% endif %}
-            {% set ns.lines = ns.lines + [line] %}
+            {% if line | trim %}{% set ns.lines = ns.lines + ['- ' ~ line] %}{% endif %}
           {% endfor %}
-          {{ ns.lines | join('\n') }}
-        {% else %}
-          {{ raw | string | trim }}
         {% endif %}
+        {# The model flagged a problem but listed nothing: fall back to its summary. #}
+        {% if not ns.lines and (ai.data.status | default('') | lower) in ['warning', 'critical'] %}
+          {% set ns.lines = ['- ' ~ (ai.data.summary | default('The AI reported a problem but gave no details.'))] %}
+        {% endif %}
+        {{ ns.lines | join('\n') }}
 
   - variables:
       analysis:
@@ -480,6 +487,15 @@ actions:
         {%- endif %}
 
         _{{ report.since[11:16] }}–{{ report.generated_at[11:16] }} · {{ report.stats.containers_with_output }} containers with output · {{ report.stats.raw_lines }} lines_
+      # Same content as plain text for phone pushes: no markdown, "•" bullets,
+      # "→" arrows, and kept under the ~4 KB push payload limit.
+      phone_message: >-
+        {% set ns = namespace(lines=[ai.data.summary | default('') | trim]) %}
+        {% for l in (issues_text | trim).split('\n') if l | trim %}
+          {% set ns.lines = ns.lines + ['• ' ~ (l | trim | regex_replace('^-\\s*', '') | replace(' -> ', ' → '))] %}
+        {% endfor %}
+        {% set text = ns.lines | join('\n\n') %}
+        {{ text[:3000] ~ ('…' if text | length > 3000 else '') }}
 
   - event: docker_log_analysis
     event_data:

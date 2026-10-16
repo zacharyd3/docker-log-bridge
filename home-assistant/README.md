@@ -81,17 +81,27 @@ Variables available to **Extra actions**: `analysis.status` (`ok` / `warning` /
 `notification_message`, plus `report` (the full bridge response, e.g.
 `report.stats.errors`, `report.problems`, `report.hosts_down`).
 
-Example mobile push:
+Example mobile push (Home Assistant Companion app) that carries the whole
+analysis and opens the dashboard when tapped:
 
 ```yaml
 - action: notify.mobile_app_your_phone
   data:
     title: "{{ notification_title }}"
-    message: "{{ analysis.summary }}"
+    message: "{{ phone_message }}"
     data:
-      tag: docker-log-analysis
+      tag: docker-log-analysis        # replaces the previous one instead of stacking
       group: docker
+      clickAction: /docker-logs/docker-logs   # Android: where a tap goes
+      url: /docker-logs/docker-logs           # iOS: where a tap goes
 ```
+
+`phone_message` is the summary plus one `•` line per issue, as plain text,
+capped at 3,000 characters to stay under the push size limit. A tap opens the
+path you give, so use your Docker Logs dashboard's URL path, e.g.
+`/dashboard-docker/docker-logs`. To read a long one on the phone itself, expand
+the notification: drag it down or tap the arrow on Android, or long-press on
+iOS.
 
 ## 3. Dashboard (optional)
 

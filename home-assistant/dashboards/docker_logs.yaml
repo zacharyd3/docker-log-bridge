@@ -138,6 +138,8 @@ views:
                  | replace(' -> ', ' → ') }}
               {% elif states('sensor.docker_log_health') in ['unknown', 'unavailable'] %}
               _No analysis yet._
+              {% elif states('sensor.docker_log_health') in ['warning', 'critical'] %}
+              _The AI didn't list individual issues for this check. See the summary above._
               {% else %}
               <ha-icon icon="mdi:check-circle-outline"></ha-icon> Nothing needs attention right now.
               {% endif %}
