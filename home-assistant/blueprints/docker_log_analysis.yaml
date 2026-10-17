@@ -47,25 +47,45 @@ blueprint:
       input:
         interval:
           name: Run every
-          default: "/10"
+          default: "10"
           selector:
             select:
               options:
                 - label: 5 minutes
-                  value: "/5"
+                  value: "5"
                 - label: 10 minutes
-                  value: "/10"
+                  value: "10"
                 - label: 15 minutes
-                  value: "/15"
-                - label: 20 minutes
-                  value: "/20"
+                  value: "15"
                 - label: 30 minutes
-                  value: "/30"
+                  value: "30"
+                - label: 1 hour
+                  value: "60"
+                - label: 2 hours
+                  value: "120"
+                - label: 3 hours
+                  value: "180"
+                - label: 6 hours
+                  value: "360"
+                - label: 12 hours
+                  value: "720"
+                - label: Once a day
+                  value: "1440"
+        start_time:
+          name: Starting at
+          description: >
+            Runs are counted from this time of day. With "Once a day" this is
+            when it runs; with "6 hours" and a start of 08:00 it runs at 02:00,
+            08:00, 14:00 and 20:00. Short intervals line up with it too.
+          default: "08:00:00"
+          selector:
+            time:
         lookback:
           name: Look back (minutes)
           description: >
             How much log history each run analyses. 0 = same as the run
-            interval, so every line is looked at exactly once.
+            interval, so every line is looked at exactly once. The bridge reads
+            at most 1440 minutes (24 hours).
           default: 0
           selector:
             number:
@@ -192,8 +212,23 @@ blueprint:
       icon: mdi:bell-outline
       input:
         min_severity:
-          name: Notify at
+          name: HA notification at
+          description: When the persistent notification in Home Assistant is shown.
           default: warning
+          selector:
+            select:
+              options:
+                - label: Warning or worse
+                  value: warning
+                - label: Critical only
+                  value: critical
+        actions_min_severity:
+          name: Extra actions at
+          description: >
+            When the Extra actions below (e.g. your phone push) run. Keep this
+            on "Critical only" to be pinged only when something is down, while
+            warnings still show up in Home Assistant.
+          default: critical
           selector:
             select:
               options:
@@ -215,7 +250,7 @@ blueprint:
         notify_actions:
           name: Extra actions
           description: >
-            Run when an analysis meets the threshold, e.g. a mobile push.
+            Run when an analysis reaches "Extra actions at", e.g. a mobile push.
             Available variables: `analysis.status`, `analysis.summary`,
             `analysis.issues`, `notification_title`, `notification_message`
             (markdown), and `phone_message` (the same as plain text for mobile pushes).
@@ -223,9 +258,20 @@ blueprint:
           selector:
             action:
 
+# Wake every 5 minutes; the condition below lets only the runs that fall on
+# the chosen schedule through (cheap, and works for any interval up to a day).
 triggers:
   - trigger: time_pattern
-    minutes: !input interval
+    minutes: "/5"
+
+conditions:
+  - condition: template
+    value_template: >-
+      {% set every = interval | string | replace('/', '') | int(10) %}
+      {% set t = (start_time | default('00:00:00') | string).split(':') %}
+      {% set start = t[0] | int(0) * 60 + (t[1] | int(0) if t | length > 1 else 0) %}
+      {% set now_min = now().hour * 60 + now().minute %}
+      {{ (now_min - start) % every == 0 }}
 
 mode: single
 max_exceeded: silent
@@ -233,6 +279,7 @@ max_exceeded: silent
 variables:
   bridge_url: !input bridge_url
   interval: !input interval
+  start_time: !input start_time
   lookback: !input lookback
   hosts: !input hosts
   containers: !input containers
@@ -245,10 +292,11 @@ variables:
   skip_when_quiet: !input skip_when_quiet
   strictness: !input strictness
   min_severity: !input min_severity
+  actions_min_severity: !input actions_min_severity
   persistent_notification: !input persistent_notification
   notify_bridge_errors: !input notify_bridge_errors
   window_minutes: >-
-    {{ lookback | int(0) if lookback | int(0) > 0 else interval | replace('/', '') | int(10) }}
+    {{ [lookback | int(0) if lookback | int(0) > 0 else interval | string | replace('/', '') | int(10), 1440] | min }}
   severity_rank: {ok: 0, warning: 1, critical: 2}
 
 actions:
@@ -503,17 +551,20 @@ actions:
       analysed: true
       <<: *report_fields
 
-  - condition: template
-    value_template: >-
-      {{ severity_rank.get(analysis.status, 1) >= severity_rank.get(min_severity, 1) }}
-
-  - if: "{{ persistent_notification }}"
+  # "ok" never notifies; each channel has its own threshold.
+  - if: >-
+      {{ persistent_notification
+         and severity_rank.get(analysis.status, 1) >= severity_rank.get(min_severity, 1) }}
     then:
       - action: persistent_notification.create
         data:
           notification_id: docker_log_analysis
           title: "{{ notification_title }}"
           message: "{{ notification_message }}"
+
+  - condition: template
+    value_template: >-
+      {{ severity_rank.get(analysis.status, 1) >= severity_rank.get(actions_min_severity, 2) }}
 
   - choose: []
     default: !input notify_actions

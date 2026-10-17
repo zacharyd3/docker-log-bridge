@@ -61,7 +61,8 @@ Then **Create automation** from it.
 | Section | Option | Notes |
 |---|---|---|
 | Bridge | Bridge URL | `http://192.168.250.4:8084` by default; use the URL install.sh printed |
-| Schedule | Run every | 5 / 10 / 15 / 20 / 30 min |
+| Schedule | Run every | 5, 10, 15 or 30 min; 1, 2, 3, 6 or 12 hours; once a day |
+| | Starting at | Time of day the schedule counts from (default 08:00, so a daily check runs at 08:00) |
 | | Look back | 0 = same as the interval (every line is analysed exactly once) |
 | What to read | Docker hosts | Labels from `DOCKER_HOSTS`, e.g. `Thor, Mjolnir`; empty = all |
 | | Only these / Exclude containers | Names or globs: `plex`, `*arr`, `Thor/*` |
@@ -72,7 +73,8 @@ Then **Create automation** from it.
 | | What counts as an issue | **Anything I could fix** (default: also config, path, permission and credential errors, failed imports/jobs, repeated errors) or **Only outages** (crashes, restart loops, health checks, disk, data loss) |
 | | Extra instructions | Context about your setup, things to ignore |
 | | Skip AI when nothing looks wrong | Default on: no AI call (and no cost) on quiet windows |
-| Notifications | Notify at | Warning or worse / Critical only |
+| Notifications | HA notification at | Warning or worse / Critical only, for the persistent notification |
+| | Extra actions at | Warning or worse / **Critical only** (default), for your phone push and other actions. "ok" never notifies |
 | | Persistent notification | Replaces itself, so they don't pile up |
 | | Extra actions | Mobile push etc.; see the variables below |
 
