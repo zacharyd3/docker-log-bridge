@@ -464,10 +464,8 @@ actions:
             {% if line | trim %}{% set ns.lines = ns.lines + ['- ' ~ line] %}{% endif %}
           {% endfor %}
         {% endif %}
-        {# The model flagged a problem but listed nothing: fall back to its summary. #}
-        {% if not ns.lines and (ai.data.status | default('') | lower) in ['warning', 'critical'] %}
-          {% set ns.lines = ['- ' ~ (ai.data.summary | default('The AI reported a problem but gave no details.'))] %}
-        {% endif %}
+        {# No usable lines stays empty: notifications then show just the summary, and the
+           dashboard's Issues card points at the summary instead of repeating it. #}
         {{ ns.lines | join('\n') }}
 
   - variables:
