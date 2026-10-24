@@ -1,9 +1,9 @@
 # Docker Logs dashboard: paste into a new dashboard's raw configuration editor.
-# Needs HACS frontend cards: Mushroom, ApexCharts Card, card-mod.
+# Needs HACS frontend cards: Mushroom, ApexCharts Card, card-mod, auto-entities.
 # Entities come from home-assistant/packages/docker_log_bridge.yaml.
 #
 # Markdown cards: HA strips class/style attributes from markdown HTML, so the
-# layout below is plain markdown (paragraphs, tables, rules) styled through
+# layout below is plain markdown (paragraphs, lists, tables) styled through
 # card-mod with element/attribute selectors.
 #
 # Container columns: one stack per Docker host (under the charts), each listing that host's
@@ -11,6 +11,9 @@
 # integration) via auto-entities (HACS). Rename/add host sections to match
 # your DOCKER_HOSTS labels. Tiles pick up the log check's verdict by matching
 # the switch's entity id to the bridge's "Host/container" names.
+#
+# Errors / Warnings counters: tap one to open a subview listing every distinct
+# line behind it, grouped by container; hold it for the history graph.
 title: Docker Logs
 views:
   - title: Docker Logs
@@ -19,7 +22,7 @@ views:
     type: sections
     max_columns: 3
     sections:
-      # ── Left: status, issues, trends ──────────────────────────────────────
+      # ── Left: status, issues, trends, containers ──────────────────────────
       # Two stacks (left wide, right narrow) instead of rows of sections, so a
       # short status column never leaves a gap under it.
       - type: grid
@@ -36,14 +39,13 @@ views:
             primary: >-
               {{ {'ok': 'All clear', 'warning': 'Needs attention', 'critical': 'Critical',
                   'error': 'Bridge unreachable'}.get(states(entity), 'Waiting for the first check') }}
+            # The latest notable run, so a quiet "ok" run doesn't hide the AI's verdict.
             secondary: >-
-              {{ state_attr(entity, 'summary') or 'Nothing has been analysed yet. Run a check or wait for the schedule.' }}
+              {% set h = state_attr(entity, 'history') or [] %}{{ h[0].summary if h else '' }}
             icon: >-
               {{ {'ok': 'mdi:check-circle', 'warning': 'mdi:alert', 'critical': 'mdi:alert-octagon',
                   'error': 'mdi:lan-disconnect'}.get(states(entity), 'mdi:help-circle') }}
             color: >-
-              {{ {'ok': 'green', 'warning': 'amber', 'critical': 'red', 'error': 'grey'}.get(states(entity), 'grey') }}
-            icon_color: >-
               {{ {'ok': 'green', 'warning': 'amber', 'critical': 'red', 'error': 'grey'}.get(states(entity), 'grey') }}
             multiline_secondary: true
             tap_action:
@@ -52,66 +54,143 @@ views:
               style: |
                 {% set c = {'ok': 'green', 'warning': 'amber', 'critical': 'red'}.get(states(config.entity), 'grey') %}
                 ha-card {
-                  padding: 14px 8px !important;
-                  border: 1px solid color-mix(in srgb, var(--{{ c }}-color) 35%, transparent) !important;
-                  background: color-mix(in srgb, var(--{{ c }}-color) 9%, var(--ha-card-background, var(--card-background-color))) !important;
+                  padding: 22px 18px !important;
+                  border-radius: 22px !important;
+                  border: 1px solid color-mix(in srgb, var(--{{ c }}-color) 40%, transparent) !important;
+                  background: color-mix(in srgb, var(--{{ c }}-color) 8%, var(--ha-card-background, var(--card-background-color))) !important;
                 }
                 ha-tile-icon {
-                  --tile-icon-size: 52px !important;
-                  --tile-icon-border-radius: 16px !important;
-                  --mdc-icon-size: 30px;
+                  --tile-icon-size: 60px !important;
+                  --tile-icon-border-radius: 20px !important;
+                  --mdc-icon-size: 32px;
                 }
                 ha-tile-info {
-                  --tile-info-primary-font-size: 22px !important;
-                  --tile-info-primary-line-height: 30px !important;
+                  --tile-info-primary-font-size: 28px !important;
+                  --tile-info-primary-line-height: 34px !important;
                   --tile-info-primary-font-weight: 600 !important;
-                  --tile-info-secondary-font-size: 15px !important;
-                  --tile-info-secondary-line-height: 22px !important;
-                  margin-left: 6px;
+                  --tile-info-secondary-font-size: 14px !important;
+                  --tile-info-secondary-line-height: 21px !important;
+                  margin-left: 8px;
                 }
+
+          - type: grid
+            columns: 4
+            square: false
+            grid_options:
+              columns: full
+            cards:
+              - type: custom:mushroom-template-card
+                entity: sensor.docker_log_errors
+                primary: "{{ states(entity) | int(0) }}"
+                secondary: Errors
+                icon: mdi:alert-circle
+                color: "{{ 'red' if states(entity) | int(0) > 0 else 'disabled' }}"
+                # Relative path: the Errors subview of this dashboard, whatever its URL.
+                tap_action:
+                  action: navigate
+                  navigation_path: docker-log-errors
+                hold_action:
+                  action: more-info
+                card_mod:
+                  style: |
+                    {% set hot = states(config.entity) | int(0) > 0 %}
+                    ha-card {
+                      padding: 14px 10px !important;
+                      border-radius: 18px !important;
+                      border: 1px solid {{ 'color-mix(in srgb, var(--red-color) 40%, transparent)' if hot else 'var(--divider-color)' }} !important;
+                    }
+                    ha-tile-icon { --tile-icon-size: 38px !important; --tile-icon-border-radius: 12px !important; }
+                    ha-tile-info {
+                      --tile-info-primary-font-size: 26px !important;
+                      --tile-info-primary-line-height: 30px !important;
+                      --tile-info-primary-font-weight: 600 !important;
+                      --tile-info-secondary-font-size: 12px !important;
+                    }
+
+              - type: custom:mushroom-template-card
+                entity: sensor.docker_log_warnings
+                primary: "{{ states(entity) | int(0) }}"
+                secondary: Warnings
+                icon: mdi:alert
+                color: "{{ 'amber' if states(entity) | int(0) > 0 else 'disabled' }}"
+                tap_action:
+                  action: navigate
+                  navigation_path: docker-log-warnings
+                hold_action:
+                  action: more-info
+                card_mod:
+                  style: |
+                    {% set hot = states(config.entity) | int(0) > 0 %}
+                    ha-card {
+                      padding: 14px 10px !important;
+                      border-radius: 18px !important;
+                      border: 1px solid {{ 'color-mix(in srgb, var(--amber-color) 40%, transparent)' if hot else 'var(--divider-color)' }} !important;
+                    }
+                    ha-tile-icon { --tile-icon-size: 38px !important; --tile-icon-border-radius: 12px !important; }
+                    ha-tile-info {
+                      --tile-info-primary-font-size: 26px !important;
+                      --tile-info-primary-line-height: 30px !important;
+                      --tile-info-primary-font-weight: 600 !important;
+                      --tile-info-secondary-font-size: 12px !important;
+                    }
+
+              - type: custom:mushroom-template-card
+                entity: sensor.docker_hosts_online
+                primary: >-
+                  {{ states(entity) | int(0) }}/{{ (state_attr(entity, 'hosts') or []) | length }}
+                secondary: Hosts online
+                icon: mdi:server-network
+                color: >-
+                  {% set hosts = state_attr(entity, 'hosts') or [] %}{{ 'green' if hosts and states(entity) | int(0) == hosts | length else 'red' }}
+                tap_action:
+                  action: more-info
+                card_mod:
+                  style: |
+                    {% set hosts = state_attr(config.entity, 'hosts') or [] %}
+                    {% set ok = hosts and states(config.entity) | int(0) == hosts | length %}
+                    ha-card {
+                      padding: 14px 10px !important;
+                      border-radius: 18px !important;
+                      border: 1px solid {{ 'var(--divider-color)' if ok else 'color-mix(in srgb, var(--red-color) 40%, transparent)' }} !important;
+                    }
+                    ha-tile-icon { --tile-icon-size: 38px !important; --tile-icon-border-radius: 12px !important; }
+                    ha-tile-info {
+                      --tile-info-primary-font-size: 26px !important;
+                      --tile-info-primary-line-height: 30px !important;
+                      --tile-info-primary-font-weight: 600 !important;
+                      --tile-info-secondary-font-size: 12px !important;
+                    }
+
+              - type: custom:mushroom-template-card
+                entity: sensor.docker_log_health
+                primary: >-
+                  {% set t = state_attr(entity, 'checked_at') %}{{ relative_time(as_datetime(t)) ~ ' ago' if t else 'Never' }}
+                secondary: >-
+                  {{ 'AI reviewed' if state_attr(entity, 'analysed') else 'Quiet, AI skipped' }}
+                icon: mdi:clock-outline
+                color: "{{ 'deep-purple' if state_attr(entity, 'analysed') else 'blue' }}"
+                tap_action:
+                  action: more-info
+                card_mod:
+                  style: |
+                    ha-card {
+                      padding: 14px 10px !important;
+                      border-radius: 18px !important;
+                      border: 1px solid var(--divider-color) !important;
+                    }
+                    ha-tile-icon { --tile-icon-size: 38px !important; --tile-icon-border-radius: 12px !important; }
+                    ha-tile-info {
+                      --tile-info-primary-font-size: 17px !important;
+                      --tile-info-primary-line-height: 30px !important;
+                      --tile-info-primary-font-weight: 600 !important;
+                      --tile-info-secondary-font-size: 12px !important;
+                    }
 
           - type: custom:mushroom-chips-card
             grid_options:
               columns: full
+            alignment: end
             chips:
-              - type: template
-                entity: sensor.docker_log_health
-                icon: mdi:clock-outline
-                content: >-
-                  {% set t = state_attr('sensor.docker_log_health', 'checked_at') %}
-                  {{ 'Checked ' ~ relative_time(as_datetime(t)) ~ ' ago' if t else 'Never checked' }}
-                tap_action:
-                  action: more-info
-              - type: template
-                icon: mdi:robot-outline
-                icon_color: >-
-                  {{ 'deep-purple' if state_attr('sensor.docker_log_health', 'analysed') else 'grey' }}
-                content: >-
-                  {{ 'AI reviewed' if state_attr('sensor.docker_log_health', 'analysed') else 'Quiet, AI skipped' }}
-              - type: template
-                entity: sensor.docker_log_errors
-                icon: mdi:alert-circle
-                icon_color: "{{ 'red' if states(entity) | int(0) > 0 else 'grey' }}"
-                content: "{{ states(entity) | int(0) }} errors"
-                tap_action:
-                  action: more-info
-              - type: template
-                entity: sensor.docker_log_warnings
-                icon: mdi:alert
-                icon_color: "{{ 'amber' if states(entity) | int(0) > 0 else 'grey' }}"
-                content: "{{ states(entity) | int(0) }} warnings"
-                tap_action:
-                  action: more-info
-              - type: template
-                entity: sensor.docker_hosts_online
-                icon: mdi:server-network
-                icon_color: >-
-                  {% set hosts = state_attr(entity, 'hosts') or [] %}
-                  {{ 'green' if hosts and states(entity) | int(0) == hosts | length else 'red' }}
-                content: >-
-                  {{ states(entity) | int(0) }}/{{ (state_attr(entity, 'hosts') or []) | length }} hosts
-                tap_action:
-                  action: more-info
               - type: template
                 icon: mdi:play-circle
                 icon_color: primary
@@ -146,9 +225,12 @@ views:
             card_mod:
               style:
                 ha-markdown$: |
-                  ul { padding-left: 20px; margin: 0; }
-                  li { margin: 6px 0; line-height: 1.55; }
-                  li::marker { color: var(--secondary-text-color); }
+                  ul { padding: 0; margin: 0; list-style: none; }
+                  li { margin: 8px 0; padding: 12px 16px; line-height: 1.5; border-radius: 14px; border: 1px solid var(--divider-color); background: color-mix(in srgb, var(--primary-text-color) 3%, transparent); }
+                  li:first-child { margin-top: 0; }
+                  li:last-child { margin-bottom: 0; }
+                  p { margin: 0; }
+                  strong { font-family: var(--code-font-family, monospace); font-size: 13px; }
                   ha-icon { color: var(--green-color); --mdc-icon-size: 20px; vertical-align: -4px; }
 
           - type: heading
@@ -176,8 +258,8 @@ views:
             card_mod:
               style:
                 ha-markdown$: |
-                  p { margin: 6px 0; }
-                  ha-icon { --mdc-icon-size: 18px; vertical-align: -3px; margin-right: 4px; color: var(--secondary-text-color); }
+                  p { margin: 6px 0; padding: 10px 14px; border-radius: 12px; background: color-mix(in srgb, var(--primary-text-color) 3%, transparent); border: 1px solid var(--divider-color); }
+                  ha-icon { --mdc-icon-size: 18px; vertical-align: -3px; margin-right: 6px; color: var(--secondary-text-color); }
                   ha-icon[icon="mdi:heart-broken"], ha-icon[icon="mdi:stop-circle-outline"] { color: var(--red-color); }
                   ha-icon[icon="mdi:restart-alert"], ha-icon[icon="mdi:timer-sand"] { color: var(--amber-color); }
 
@@ -196,11 +278,26 @@ views:
               colorize_states: true
             apex_config:
               chart:
-                height: 220
+                height: 230
+                fontFamily: inherit
+                toolbar:
+                  show: false
               legend:
                 show: false
+              dataLabels:
+                enabled: false
+              plotOptions:
+                bar:
+                  columnWidth: 55%
+                  borderRadius: 3
               grid:
-                strokeDashArray: 3
+                strokeDashArray: 4
+                borderColor: rgba(127,127,127,0.2)
+              xaxis:
+                axisBorder:
+                  show: false
+                axisTicks:
+                  show: false
               yaxis:
                 - id: errors
                   min: 0
@@ -208,7 +305,7 @@ views:
                   decimalsInFloat: 0
                   labels:
                     style:
-                      colors: "#e5484d"
+                      colors: "#ff6b6b"
                 - id: warnings
                   opposite: true
                   min: 0
@@ -222,7 +319,7 @@ views:
                 name: Errors
                 yaxis_id: errors
                 type: column
-                color: "#e5484d"
+                color: "#ff6b6b"
                 group_by:
                   func: max
                   duration: 30min
@@ -254,6 +351,16 @@ views:
           - type: vertical-stack
             grid_options:
               columns: 8
+            # The stack itself draws the host's box.
+            card_mod: &host_box
+              style: |
+                :host {
+                  display: block;
+                  padding: 14px;
+                  border-radius: 22px;
+                  border: 1px solid var(--divider-color);
+                  background: var(--ha-card-background, var(--card-background-color));
+                }
             cards:
               - type: custom:mushroom-template-card
                 entity: sensor.docker_hosts_online
@@ -269,10 +376,11 @@ views:
                   {{ 'green' if h and h.ok else 'red' if h else 'disabled' }}
                 tap_action:
                   action: more-info
-                card_mod:
+                card_mod: &host_header
                   style: |
-                    ha-card { background: none !important; border: none !important; box-shadow: none !important; padding: 0 !important; }
-                    ha-tile-info { --tile-info-primary-font-size: 20px !important; --tile-info-primary-line-height: 26px !important; --tile-info-primary-font-weight: 500 !important; }
+                    ha-card { background: none !important; border: none !important; box-shadow: none !important; padding: 0 0 4px !important; }
+                    ha-tile-icon { --tile-icon-size: 40px !important; --tile-icon-border-radius: 13px !important; }
+                    ha-tile-info { --tile-info-primary-font-size: 20px !important; --tile-info-primary-line-height: 26px !important; --tile-info-primary-font-weight: 600 !important; --tile-info-secondary-font-size: 12.5px !important; }
 
               - type: custom:auto-entities
                 grid_options:
@@ -322,7 +430,7 @@ views:
                           {% endfor %}
                           {% if 'UNHEALTHY' in ns.problem or 'stopped' in ns.problem or 'restart loop' in ns.problem %}red
                           {% elif ns.problem %}amber
-                          {% elif is_state(entity, 'on') %}blue
+                          {% elif is_state(entity, 'on') %}green
                           {% else %}disabled{% endif %}
                         features_position: inline
                         features:
@@ -339,11 +447,34 @@ views:
                             text: Restart this container?
                         hold_action:
                           action: more-info
-                        # A compact switch instead of the default wide bar, so
-                        # container names fit in a third of the section.
+                        # Red/amber tint when the log check flags the container, and a
+                        # compact switch instead of the default wide bar, so container
+                        # names fit in a third of the section.
                         card_mod:
                           style:
                             .: |
+                              {% set id = config.entity.split('.')[1].split('_', 2) %}
+                              {% set key = id[1] ~ '/' ~ (id[2] if id | length > 2 else '') | regex_replace('[^a-z0-9]', '') %}
+                              {% set ns = namespace(problem='') %}
+                              {% for p in state_attr('sensor.docker_log_health', 'problems') or [] %}
+                                {% if p.partition(': ')[0] | lower | regex_replace('[^a-z0-9/]', '') == key %}{% set ns.problem = p.partition(': ')[2] %}{% endif %}
+                              {% endfor %}
+                              {% if 'UNHEALTHY' in ns.problem or 'stopped' in ns.problem or 'restart loop' in ns.problem %}{% set tone = 'var(--red-color)' %}
+                              {% elif ns.problem %}{% set tone = 'var(--amber-color)' %}
+                              {% else %}{% set tone = '' %}{% endif %}
+                              ha-card {
+                                border-radius: 14px !important;
+                                padding: 4px 2px !important;
+                                box-shadow: none !important;
+                                {% if tone %}
+                                border: 1px solid color-mix(in srgb, {{ tone }} 45%, transparent) !important;
+                                background: color-mix(in srgb, {{ tone }} 9%, var(--ha-card-background, var(--card-background-color))) !important;
+                                {% else %}
+                                border: 1px solid var(--divider-color) !important;
+                                background: color-mix(in srgb, var(--primary-text-color) 3%, var(--ha-card-background, var(--card-background-color))) !important;
+                                {% endif %}
+                              }
+                              ha-tile-info { --tile-info-primary-font-size: 14px !important; --tile-info-secondary-font-size: 12.5px !important; }
                               hui-card-features.features-inline { width: 60px !important; min-width: 60px !important; flex: none !important; }
                             hui-card-features$: |
                               hui-card-feature { width: 100% !important; min-width: 0 !important; }
@@ -358,6 +489,7 @@ views:
           - type: vertical-stack
             grid_options:
               columns: 8
+            card_mod: *host_box
             cards:
               - type: custom:mushroom-template-card
                 entity: sensor.docker_hosts_online
@@ -373,10 +505,7 @@ views:
                   {{ 'green' if h and h.ok else 'red' if h else 'disabled' }}
                 tap_action:
                   action: more-info
-                card_mod:
-                  style: |
-                    ha-card { background: none !important; border: none !important; box-shadow: none !important; padding: 0 !important; }
-                    ha-tile-info { --tile-info-primary-font-size: 20px !important; --tile-info-primary-line-height: 26px !important; --tile-info-primary-font-weight: 500 !important; }
+                card_mod: *host_header
 
               - type: custom:auto-entities
                 grid_options:
@@ -402,6 +531,7 @@ views:
           - type: vertical-stack
             grid_options:
               columns: 8
+            card_mod: *host_box
             cards:
               - type: custom:mushroom-template-card
                 entity: sensor.docker_hosts_online
@@ -417,10 +547,7 @@ views:
                   {{ 'green' if h and h.ok else 'red' if h else 'disabled' }}
                 tap_action:
                   action: more-info
-                card_mod:
-                  style: |
-                    ha-card { background: none !important; border: none !important; box-shadow: none !important; padding: 0 !important; }
-                    ha-tile-info { --tile-info-primary-font-size: 20px !important; --tile-info-primary-line-height: 26px !important; --tile-info-primary-font-weight: 500 !important; }
+                card_mod: *host_header
 
               - type: custom:auto-entities
                 grid_options:
@@ -468,7 +595,7 @@ views:
                 ha-markdown$: |
                   table { width: 100%; border-collapse: collapse; font-size: 14px; }
                   thead { display: none; }
-                  td { padding: 6px 0 18px !important; border: none !important; background-repeat: no-repeat; background-size: 100% 5px; background-position: left bottom 6px; }
+                  td { padding: 6px 0 18px !important; border: none !important; background-repeat: no-repeat; background-size: 100% 6px; background-position: left bottom 6px; }
                   td:last-child { text-align: right; font-variant-numeric: tabular-nums; color: var(--secondary-text-color); }
                   p { color: var(--secondary-text-color); font-size: 12px; margin-top: 10px; }
                   {% set n = state_attr('sensor.docker_log_health', 'noisiest') or [] %}
@@ -477,7 +604,8 @@ views:
                   {% set pct = (100 * x.lines / top) | round(1) %}
                   tbody tr:nth-child({{ loop.index }}) td:first-child {
                     background-image: linear-gradient(90deg, var(--primary-color) {{ pct }}%, var(--divider-color) {{ pct }}%);
-                    background-size: calc(100% + 60px) 5px;
+                    background-size: calc(100% + 60px) 6px;
+                    border-radius: 3px;
                   }
                   tbody tr:nth-child({{ loop.index }}) td:last-child {
                     background-image: linear-gradient(90deg, var(--divider-color) 100%, transparent 0);
@@ -500,10 +628,168 @@ views:
             card_mod:
               style:
                 ha-markdown$: |
-                  p { margin: 0; padding: 10px 0 10px 30px; position: relative; font-size: 14px; line-height: 1.45; }
+                  p { margin: 0; padding: 12px 0 12px 32px; position: relative; font-size: 14px; line-height: 1.5; }
                   p + p { border-top: 1px solid var(--divider-color); }
                   em { color: var(--secondary-text-color); font-style: normal; font-size: 12px; }
-                  ha-icon { position: absolute; left: 0; top: 10px; --mdc-icon-size: 20px; color: var(--secondary-text-color); }
+                  ha-icon { position: absolute; left: 0; top: 12px; --mdc-icon-size: 20px; color: var(--secondary-text-color); }
                   ha-icon[icon="mdi:check-circle"] { color: var(--green-color); }
                   ha-icon[icon="mdi:alert"] { color: var(--amber-color); }
                   ha-icon[icon="mdi:alert-octagon"] { color: var(--red-color); }
+                  ha-icon[icon="mdi:lan-disconnect"] { color: var(--secondary-text-color); }
+
+  # ── Subviews: every distinct line behind the Errors / Warnings counters ───
+  # Opened from the counters above (no tab of their own). Both pages share the
+  # cards below; each card reads its sensor from `entity`, and "warning" in
+  # the entity id switches the wording and colours.
+  - title: Docker errors
+    path: docker-log-errors
+    icon: mdi:alert-circle
+    subview: true
+    type: sections
+    max_columns: 2
+    sections:
+      - type: grid
+        column_span: 2
+        cards:
+          - &lines_summary
+            type: custom:mushroom-template-card
+            entity: sensor.docker_log_errors
+            grid_options:
+              columns: full
+            primary: >-
+              {% set n = states(entity) | int(0) %}
+              {{ n }} {{ 'warning' if 'warning' in entity else 'error' }} line{{ '' if n == 1 else 's' }}
+            secondary: >-
+              {% set lines = state_attr(entity, 'lines') or [] %}
+              {% set c = lines | map(attribute='container') | unique | list | length %}
+              {% set t = state_attr('sensor.docker_log_health', 'checked_at') %}
+              {% if lines %}{{ lines | length }} unique message{{ '' if lines | length == 1 else 's' }} from {{ c }} container{{ '' if c == 1 else 's' }} · {% endif %}last {{ state_attr('sensor.docker_log_health', 'window_minutes') or 10 }} min · checked {{ relative_time(as_datetime(t)) ~ ' ago' if t else 'never' }}
+            icon: "{{ 'mdi:alert' if 'warning' in entity else 'mdi:alert-circle' }}"
+            color: >-
+              {{ ('amber' if 'warning' in entity else 'red') if states(entity) | int(0) > 0 else 'disabled' }}
+            multiline_secondary: true
+            tap_action:
+              action: more-info
+            card_mod:
+              style: |
+                {% set c = ('amber' if 'warning' in config.entity else 'red') if states(config.entity) | int(0) > 0 else 'grey' %}
+                ha-card {
+                  padding: 18px 16px !important;
+                  border-radius: 22px !important;
+                  border: 1px solid color-mix(in srgb, var(--{{ c }}-color) 40%, transparent) !important;
+                  background: color-mix(in srgb, var(--{{ c }}-color) 8%, var(--ha-card-background, var(--card-background-color))) !important;
+                }
+                ha-tile-icon { --tile-icon-size: 52px !important; --tile-icon-border-radius: 16px !important; --mdc-icon-size: 28px; }
+                ha-tile-info {
+                  --tile-info-primary-font-size: 24px !important;
+                  --tile-info-primary-line-height: 30px !important;
+                  --tile-info-primary-font-weight: 600 !important;
+                  --tile-info-secondary-font-size: 13px !important;
+                  --tile-info-secondary-line-height: 19px !important;
+                  margin-left: 6px;
+                }
+
+          - type: custom:mushroom-chips-card
+            grid_options:
+              columns: full
+            alignment: end
+            chips:
+              - type: template
+                entity: sensor.docker_log_warnings
+                icon: mdi:alert
+                icon_color: "{{ 'amber' if states(entity) | int(0) > 0 else 'grey' }}"
+                content: "Warnings · {{ states(entity) | int(0) }}"
+                tap_action:
+                  action: navigate
+                  navigation_path: docker-log-warnings
+                  navigation_replace: true
+
+          # One box per message, grouped by container (busiest first), oldest
+          # first within a container. Log text goes in `code` spans so markdown
+          # and HTML in it show as typed.
+          - &lines_list
+            type: markdown
+            entity: sensor.docker_log_errors
+            grid_options:
+              columns: full
+            content: |
+              {%- macro at(ts) -%}
+                {%- if ts -%}
+                  {%- set s = as_timestamp(ts, 0) -%}
+                  {{- s | timestamp_custom('%H:%M:%S' if s | timestamp_custom('%Y-%m-%d') == now().strftime('%Y-%m-%d') else '%a %H:%M:%S') -}}
+                {%- endif -%}
+              {%- endmacro -%}
+              {%- set kind = 'warning' if 'warning' in config.entity else 'error' -%}
+              {%- set lines = state_attr(config.entity, 'lines') or [] -%}
+              {%- set total = states(config.entity) | int(0) -%}
+              {%- set listed = lines | sum(attribute='count') -%}
+              {%- set ns = namespace(container='') -%}
+              {%- for x in lines %}
+              {%- if x.container != ns.container %}{% set ns.container = x.container %}
+
+              #### {{ x.container }}
+              {% endif %}
+              - `{{ x.text | replace('`', "'") }}`
+                {%- if x.get('detail') %}<br>`{{ x.detail | replace('`', "'") }}`{% endif -%}
+                <em>{{ at(x.time) }}
+                {%- if x.count > 1 %} · {{ x.count }} times{% if x.get('last') %}, last at {{ at(x.last) }}{% endif %}{% endif -%}
+                </em>
+              {%- endfor %}
+              {% if not lines %}
+              {%- if states('sensor.docker_log_health') in ['unknown', 'unavailable'] %}
+              _No check yet._
+              {%- elif total %}
+              _The last check counted {{ total }} {{ kind }} lines but didn't send them. Update the bridge, re-import the blueprint, then run a check._
+              {%- else %}
+              <ha-icon icon="mdi:check-circle-outline"></ha-icon> No {{ kind }} lines in the last {{ state_attr('sensor.docker_log_health', 'window_minutes') or 10 }} minutes.
+              {%- endif %}
+              {%- elif total > listed %}
+
+              _{{ total - listed }} more {{ kind }} line{{ '' if total - listed == 1 else 's' }} from messages not listed. Each container's most repeated messages come first._
+              {%- endif %}
+            card_mod:
+              style:
+                ha-markdown$: |
+                  {% set c = 'amber' if 'warning' in config.entity else 'red' %}
+                  h4 { margin: 22px 0 8px; font-family: var(--code-font-family, monospace); font-size: 14px; font-weight: 600; }
+                  h4:first-child { margin-top: 0; }
+                  ul { padding: 0; margin: 0; list-style: none; }
+                  li { margin: 6px 0; padding: 10px 14px; line-height: 1.5; border-radius: 12px; border: 1px solid var(--divider-color); border-left: 3px solid var(--{{ c }}-color); background: color-mix(in srgb, var(--primary-text-color) 3%, transparent); }
+                  p { margin: 0; }
+                  code { background: none; padding: 0; font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
+                  br + code { color: var(--secondary-text-color); }
+                  li em { display: block; margin-top: 4px; }
+                  em { color: var(--secondary-text-color); font-style: normal; font-size: 12px; }
+                  ul + p { margin-top: 12px; }
+                  ha-icon { color: var(--green-color); --mdc-icon-size: 20px; vertical-align: -4px; }
+
+  - title: Docker warnings
+    path: docker-log-warnings
+    icon: mdi:alert
+    subview: true
+    type: sections
+    max_columns: 2
+    sections:
+      - type: grid
+        column_span: 2
+        cards:
+          - <<: *lines_summary
+            entity: sensor.docker_log_warnings
+
+          - type: custom:mushroom-chips-card
+            grid_options:
+              columns: full
+            alignment: end
+            chips:
+              - type: template
+                entity: sensor.docker_log_errors
+                icon: mdi:alert-circle
+                icon_color: "{{ 'red' if states(entity) | int(0) > 0 else 'grey' }}"
+                content: "Errors · {{ states(entity) | int(0) }}"
+                tap_action:
+                  action: navigate
+                  navigation_path: docker-log-errors
+                  navigation_replace: true
+
+          - <<: *lines_list
+            entity: sensor.docker_log_warnings

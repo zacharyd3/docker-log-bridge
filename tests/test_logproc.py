@@ -3,7 +3,7 @@ from datetime import timezone
 import pytest
 
 from bridge.collector import name_matches, parse_hosts
-from bridge.logproc import ContainerLog, detect_level, format_entry, split_docker_timestamp
+from bridge.logproc import ContainerLog, detect_level, format_entry, line_items, split_docker_timestamp
 
 
 @pytest.mark.parametrize("line,level", [
@@ -137,3 +137,32 @@ def test_health_output_strips_progress_meter():
     assert _clean_health_output(raw) == "Health check exceeded timeout (30s):"
     assert _clean_health_output("PONG\n") == "PONG"
     assert _clean_health_output(None) == ""
+
+
+def test_line_items_lists_each_distinct_line():
+    plex, radarr = ContainerLog("Thor", "plex"), ContainerLog("Thor", "radarr")
+    _feed(plex, ["ERROR - Database is locked", "Traceback (most recent call last):",
+                 '  File "/app/x.py", line 3, in sync', "sqlite3.OperationalError: database is locked"]
+          + ["ERROR - Database is locked"] * 2 + ["WARN slow query", "all good"])
+    _feed(radarr, ["[Error] Import failed, path does not exist"])
+    errors = line_items([radarr, plex], "error", 25, timezone.utc)
+    assert errors == [
+        {"container": "Thor/plex", "time": "2026-10-15T21:00:00+00:00", "count": 3,
+         "text": "ERROR - Database is locked", "last": "2026-10-15T21:00:05+00:00",
+         "detail": "sqlite3.OperationalError: database is locked"},
+        {"container": "Thor/radarr", "time": "2026-10-15T21:00:00+00:00", "count": 1,
+         "text": "[Error] Import failed, path does not exist"},
+    ]
+    assert sum(i["count"] for i in errors) == plex.counts()["error"] + radarr.counts()["error"]
+    assert [i["text"] for i in line_items([plex], "warning", 25, timezone.utc)] == ["WARN slow query"]
+
+
+def test_line_items_limit_keeps_every_container():
+    chatty, quiet = ContainerLog("Thor", "chatty"), ContainerLog("Odin", "quiet")
+    _feed(chatty, [f"ERROR job {chr(65 + i)} failed" for i in range(20)] + ["ERROR job A failed"])
+    _feed(quiet, ["ERROR disk full", "x" * 500 + " error"])
+    items = line_items([chatty, quiet], "error", 4, timezone.utc)
+    assert [i["container"] for i in items] == ["Thor/chatty", "Thor/chatty", "Odin/quiet", "Odin/quiet"]
+    assert items[0]["text"] == "ERROR job A failed" and items[0]["count"] == 2  # most repeated kept
+    assert [i["time"] for i in items[2:]] == sorted(i["time"] for i in items[2:])  # time order
+    assert len(items[3]["text"]) == 200 and items[3]["text"].endswith("…")

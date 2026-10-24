@@ -60,6 +60,12 @@ template:
         state_class: measurement
         state: >-
           {{ trigger.event.data.errors | int if trigger.event.data.errors is defined else (this.state | int(none)) }}
+        attributes:
+          # Each distinct error line (container, time, count, text, detail) for
+          # the dashboard's list; kept as-is when the bridge was unreachable.
+          lines: >-
+            {{ trigger.event.data.error_lines | default([]) if trigger.event.data.errors is defined
+               else this.attributes.lines | default([]) }}
 
       - name: Docker log warnings
         unique_id: docker_log_warnings
@@ -68,6 +74,12 @@ template:
         state_class: measurement
         state: >-
           {{ trigger.event.data.warnings | int if trigger.event.data.warnings is defined else (this.state | int(none)) }}
+        attributes:
+          # Each distinct warning line (container, time, count, text, detail) for
+          # the dashboard's list; kept as-is when the bridge was unreachable.
+          lines: >-
+            {{ trigger.event.data.warning_lines | default([]) if trigger.event.data.warnings is defined
+               else this.attributes.lines | default([]) }}
 
       - name: Docker container problems
         unique_id: docker_container_problems

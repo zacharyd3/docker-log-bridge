@@ -20,7 +20,7 @@ from datetime import datetime, timedelta, timezone
 import docker
 from docker.errors import DockerException, NotFound
 
-from .logproc import LEVELS, RANK, ContainerLog, format_entry
+from .logproc import LEVELS, RANK, ContainerLog, format_entry, line_items
 
 log = logging.getLogger("docker-log-bridge")
 
@@ -89,6 +89,7 @@ class Query:
     max_lines: int = 150          # per container, after de-duplication
     max_chars: int = 40000        # whole report
     include_state: bool = True
+    max_items: int = 25           # error_lines / warning_lines, all containers
 
 
 class Collector:
@@ -312,6 +313,9 @@ class Collector:
                 "elapsed_ms": elapsed_ms,
             },
             "noisiest": noisy,
+            # The distinct lines behind stats.errors / stats.warnings, for dashboards.
+            "error_lines": line_items(logs, "error", q.max_items, self.tz),
+            "warning_lines": line_items(logs, "warning", q.max_items, self.tz),
             # True when there's anything worth an LLM's time at the requested level.
             "has_findings": bool(problems or log_errors or any(not h["ok"] for h in host_results)
                                  or any(RANK[e.level] >= max(RANK[q.level], RANK["warning"])
