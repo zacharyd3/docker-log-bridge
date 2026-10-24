@@ -52,6 +52,7 @@ DEFAULTS = {
     "level": os.environ.get("DEFAULT_LEVEL", "info").lower(),
     "max_lines": _env_int("DEFAULT_MAX_LINES", 150),
     "max_chars": _env_int("DEFAULT_MAX_CHARS", 40000),
+    "max_items": _env_int("DEFAULT_MAX_ITEMS", 25),
     "exclude": split_list(os.environ.get("EXCLUDE_CONTAINERS", "")),
     "ignore": os.environ.get("IGNORE_PATTERN", ""),
 }
@@ -136,6 +137,7 @@ def _query(params: dict) -> Query:
         max_lines=_num(params, "max_lines", DEFAULTS["max_lines"], int, 5, 5000),
         max_chars=_num(params, "max_chars", DEFAULTS["max_chars"], int, 2000, 2_000_000),
         include_state=_bool(params.get("include_state"), True),
+        max_items=_num(params, "max_items", DEFAULTS["max_items"], int, 1, 200),
     )
 
 
@@ -149,7 +151,7 @@ def index():
             "/api/hosts": "reachability of each Docker host",
             "/api/containers": "container inventory (hosts, containers, exclude filters apply)",
             "/api/logs": "report for HA: minutes, level (all|info|warning|error), hosts, containers, "
-                         "exclude, ignore (regex), max_lines, max_chars, include_state, format=text",
+                         "exclude, ignore (regex), max_lines, max_chars, max_items, include_state, format=text",
         },
         defaults={k: v for k, v in DEFAULTS.items()},
     )

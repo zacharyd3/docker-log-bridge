@@ -81,7 +81,8 @@ Then **Create automation** from it.
 Variables available to **Extra actions**: `analysis.status` (`ok` / `warning` /
 `critical`), `analysis.summary`, `analysis.issues`, `notification_title`,
 `notification_message`, plus `report` (the full bridge response, e.g.
-`report.stats.errors`, `report.problems`, `report.hosts_down`).
+`report.stats.errors`, `report.problems`, `report.hosts_down`,
+`report.error_lines`).
 
 Example mobile push (Home Assistant Companion app) that carries the whole
 analysis and opens the dashboard when tapped:
@@ -114,6 +115,9 @@ A status page for the latest check:
 - **Top:** the AI's verdict and issues, container state problems, the noisiest
   containers, 24-hour trends, a timeline of recent analyses, and a **Run check
   now** button.
+- **Errors / Warnings counters:** tap one to see every distinct line behind it,
+  grouped by container, with when it first appeared and how often it repeated.
+  Hold it for the history graph.
 - **Containers** (under the charts): one column per Docker host. The header shows
   whether the bridge can reach the host, how many containers are running, and
   the latency. Below it, each container gets a power toggle, and **tapping its
@@ -142,7 +146,7 @@ It creates these entities:
 | Entity | |
 |---|---|
 | `sensor.docker_log_health` | `ok` / `warning` / `critical` / `error` (bridge unreachable). Attributes: summary, issues, problems, noisiest, history (last 15 notable runs), … |
-| `sensor.docker_log_errors`, `sensor.docker_log_warnings` | Counts from the latest check, recorded for graphs |
+| `sensor.docker_log_errors`, `sensor.docker_log_warnings` | Counts from the latest check, recorded for graphs. Attribute `lines`: each distinct line (`container`, `time`, `count`, `last`, `text`, `detail`) |
 | `sensor.docker_container_problems` | Number of container state problems (unhealthy, restart loops, …) |
 | `sensor.docker_hosts_online`, `sensor.docker_containers_running` | Polled from the bridge every minute, independent of the schedule |
 | `script.docker_log_analysis_run_now` | Triggers your blueprint automation immediately |
@@ -154,7 +158,18 @@ The sensors fill in on the next run of the blueprint automation, or press
 **c. Create the dashboard.** Go to Settings → Dashboards → Add dashboard → "New
 dashboard from scratch". Open it, then ⋮ → Edit → ⋮ → Raw configuration editor,
 and replace everything with
-[`dashboards/docker_logs.yaml`](dashboards/docker_logs.yaml).
+[`dashboards/docker_logs.yaml`](dashboards/docker_logs.yaml). It has the main
+view plus two subviews (no tabs of their own) that the Errors and Warnings
+counters open. The counters link to them with relative paths
+(`docker-log-errors`, `docker-log-warnings`), so they work whatever URL you
+gave the dashboard. If a tap lands on an empty page, use the full path
+instead, e.g. `/dashboard-docker/docker-log-errors`.
+
+Updating from an older version: run `install.sh` again to update the bridge,
+re-import the blueprint (Settings → Automations & scenes → Blueprints → ⋮ →
+Re-import blueprint), copy the package again (keep your `resource:` URL) and
+restart Home Assistant.
+The lists fill in on the next check.
 
 The container columns list `switch.docker_<host>_*` entities, one switch per
 container, such as the ones the Monitor Docker integration creates. Rename the

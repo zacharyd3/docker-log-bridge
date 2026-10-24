@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Ordered least -> most severe. Index doubles as a numeric rank.
 LEVELS = ("debug", "info", "warning", "error")
@@ -239,3 +239,51 @@ def format_entry(entry: Entry, tz, with_time: bool = True) -> list[str]:
         extra = extra[:TRACE_HEAD] + [f"... {skipped} more lines ..."] + extra[-TRACE_TAIL:]
     lines.extend(f"    {x.strip()}" for x in extra)
     return lines
+
+
+ITEM_TEXT_CHARS, ITEM_DETAIL_CHARS = 200, 150
+_EPOCH = datetime.min.replace(tzinfo=timezone.utc)
+# The line of a stack trace that says what went wrong: "ValueError: bad",
+# "Caused by: java.io.IOException: disk full".
+_EXCEPTION_LINE_RE = re.compile(r"^(?:Caused by: )?[\w.$]*(?:Error|Exception)\b")
+
+
+def _clip(text: str, limit: int) -> str:
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
+def line_items(logs: list[ContainerLog], level: str, limit: int, tz) -> list[dict]:
+    """The distinct lines at exactly `level`, as small dicts for a dashboard.
+
+    Each container's most repeated (then newest) lines are picked round-robin,
+    so one chatty container can't push the others out of `limit`. The result is
+    grouped by container, the one with the most such lines first, and in time
+    order within a container. Sizes are capped because Home Assistant stores
+    these as state attributes (16 KB limit).
+    """
+    groups = []
+    for clog in logs:
+        entries = [e for e in clog.entries if e.level == level]
+        if entries:
+            entries.sort(key=lambda e: (e.count, e.last_ts or e.ts or _EPOCH), reverse=True)
+            groups.append((clog, entries))
+    groups.sort(key=lambda g: (-sum(e.count for e in g[1]), g[0].host.lower(), g[0].name.lower()))
+    ranked = sorted(((depth, rank, e) for rank, (_, entries) in enumerate(groups)
+                     for depth, e in enumerate(entries)), key=lambda t: t[:2])
+    keep = {id(e) for _, _, e in ranked[:limit]}
+
+    def stamp(ts):
+        return ts.astimezone(tz).isoformat(timespec="seconds") if ts else None
+
+    items = []
+    for clog, entries in groups:
+        for e in sorted((e for e in entries if id(e) in keep), key=lambda e: e.ts or _EPOCH):
+            item = {"container": f"{clog.host}/{clog.name}", "time": stamp(e.ts), "count": e.count,
+                    "text": _clip(e.text, ITEM_TEXT_CHARS)}
+            if e.count > 1 and e.last_ts and e.last_ts != e.ts:
+                item["last"] = stamp(e.last_ts)
+            cause = next((x.strip() for x in reversed(e.extra) if _EXCEPTION_LINE_RE.match(x.strip())), "")
+            if cause and cause != e.text:
+                item["detail"] = _clip(cause, ITEM_DETAIL_CHARS)
+            items.append(item)
+    return items

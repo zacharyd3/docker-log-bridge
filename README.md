@@ -136,11 +136,24 @@ See [`home-assistant/README.md`](home-assistant/README.md). In short:
 | `ignore` | – | Case-insensitive regex; matching lines are dropped (added to `IGNORE_PATTERN`) |
 | `max_lines` | 150 | Unique lines per container, before the size budget applies |
 | `max_chars` | 40000 | Size budget for the whole report |
+| `max_items` | 25 | Most entries in `error_lines` / `warning_lines` |
 | `include_state` | true | Include container state problems |
 
 The JSON response has `text` (the report), `has_findings`, `stats`
 (`errors`, `warnings`, `raw_lines`, `truncated`, …), `problems`, `hosts`,
-`hosts_down`, `read_errors` and `noisiest`.
+`hosts_down`, `read_errors`, `noisiest`, and `error_lines` / `warning_lines`:
+the distinct lines behind the two counts, whatever `level` is, e.g.
+
+```json
+{"container": "Thor/plex", "time": "2026-10-15T17:31:24-04:00", "count": 33,
+ "last": "2026-10-15T17:32:28-04:00", "text": "ERROR - Database is locked (attempt 7954)",
+ "detail": "sqlite3.OperationalError: database is locked"}
+```
+
+`last` is there when the line repeated, and `detail` when a stack trace ended
+in an exception. Each container's most repeated lines are kept first, taking
+turns between containers, so one noisy container can't push the others off
+the list. Texts are capped at 200 characters.
 
 ## Configuration (environment)
 
@@ -150,7 +163,7 @@ The JSON response has `text` (the report), `has_findings`, `stats`
 | `API_TOKEN` | – | If set, requires `Authorization: Bearer <token>` |
 | `EXCLUDE_CONTAINERS` | – | Containers never read |
 | `IGNORE_PATTERN` | – | Regex for lines always dropped |
-| `DEFAULT_MINUTES` / `DEFAULT_LEVEL` / `DEFAULT_MAX_LINES` / `DEFAULT_MAX_CHARS` | 10 / info / 150 / 40000 | Defaults for requests that don't set them |
+| `DEFAULT_MINUTES` / `DEFAULT_LEVEL` / `DEFAULT_MAX_LINES` / `DEFAULT_MAX_CHARS` / `DEFAULT_MAX_ITEMS` | 10 / info / 150 / 40000 / 25 | Defaults for requests that don't set them |
 | `TZ` | UTC | Timezone for report timestamps (install.sh uses the unraid timezone) |
 | `DOCKER_TIMEOUT` | 20 | Seconds per Docker API call |
 | `FETCH_TAIL` | 10000 | Most lines read per container per request (newest first). This keeps reads fast on big log files; the report notes when a container hit it |

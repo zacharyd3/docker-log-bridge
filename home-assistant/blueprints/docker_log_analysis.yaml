@@ -370,6 +370,9 @@ actions:
             hosts_down: "{{ report.hosts_down }}"
             hosts: "{{ report.hosts }}"
             noisiest: "{{ report.noisiest | default([]) }}"
+            # Each distinct error / warning line, for the dashboard's lists.
+            error_lines: "{{ report.error_lines | default([]) }}"
+            warning_lines: "{{ report.warning_lines | default([]) }}"
             containers_scanned: "{{ report.stats.containers_scanned }}"
             containers_with_output: "{{ report.stats.containers_with_output }}"
             raw_lines: "{{ report.stats.raw_lines }}"
